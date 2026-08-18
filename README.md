@@ -42,9 +42,15 @@ regra que garante que cada linha só é legível pelo dono. É o que segura a po
 
 ## 3. Pegar as chaves
 
-1. **Project Settings** (engrenagem) → **API**.
+1. **Project Settings** (engrenagem) → **API Keys**.
 2. Copie a **Project URL** (`https://xxxx.supabase.co`).
-3. Copie a chave **`anon` `public`** (a comprida). **Não** use a `service_role`.
+3. Copie a chave pública. Dependendo de quando seu projeto foi criado, o painel
+   chama ela de um dos dois jeitos — as duas funcionam aqui:
+   - **`anon` `public`** — começa com `eyJhbGciOi...`
+   - **Publishable key** — começa com `sb_publishable_...`
+
+**Nunca** copie a `service_role` nem uma **Secret key**. Essas ignoram o RLS e
+leem o banco inteiro; elas só existem pra código que roda em servidor.
 
 Abra [`assets/config.js`](assets/config.js) e cole as duas:
 
@@ -56,9 +62,25 @@ window.NOTAS_CONFIG = {
 };
 ```
 
-> A chave `anon` é pública por design — pode commitar num repositório aberto sem
-> problema. Ela só permite fazer o que as políticas de RLS deixam, e as políticas
-> só deixam você ver as suas notas.
+> **Por que isso não vai pro GitHub Secrets?** Porque quem precisa da chave é o
+> navegador. Num site estático, qualquer valor injetado no build acaba no
+> JavaScript publicado — dá pra ler no DevTools em dois cliques. Esconder no
+> Secrets seria só teatro.
+>
+> A chave pública foi feita pra isso: sozinha ela não abre nada. Quem decide o
+> que ela pode ler é o RLS, que roda no servidor do Supabase e não dá pra burlar
+> pelo navegador.
+
+### Conferir se a tranca funciona
+
+Com o site publicado, rode isto num terminal (sem estar logado em lugar nenhum):
+
+```bash
+curl "https://xxxx.supabase.co/rest/v1/notes?select=*" -H "apikey: SUA-CHAVE-PUBLICA"
+```
+
+Tem que responder `[]`. Se vierem suas notas, o `schema.sql` não rodou direito e
+o RLS está desligado — volte no passo 2.
 
 ## 4. Publicar no GitHub Pages
 
