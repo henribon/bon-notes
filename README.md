@@ -201,8 +201,16 @@ some da raiz e passa a viver dentro da pasta.
 Na prática: com as notas X, Y e Z, criar a pasta `AQUI` e mover X pra ela deixa a
 raiz com `AQUI`, `Y` e `Z`. Abrindo `AQUI`, você vê só o X.
 
+Pastas e notas ficam numa lista só, sem cabeçalhos separando as duas coisas.
+A ordem é: fixadas no topo, pastas em seguida, depois as notas soltas por
+recência.
+
 - **Criar pasta:** botão de pasta ao lado de "Nova nota".
-- **Mover uma nota:** com a nota aberta, use o seletor no topo do editor.
+- **Mover uma nota:** arraste ela pra cima da pasta. Com a nota aberta, o
+  seletor no topo do editor faz o mesmo — é o caminho no celular, onde arrastar
+  não funciona.
+- **Tirar da pasta:** entre na pasta e arraste a nota pro botão de voltar. Ou
+  escolha "Sem pasta" no seletor.
 - **Criar já dentro:** abra a pasta e clique em "Nova nota".
 - **Renomear / excluir:** entre na pasta — os botões aparecem no topo da lista.
 

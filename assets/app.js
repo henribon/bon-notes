@@ -321,13 +321,6 @@ function onRemote(payload, isNote) {
 
 function renderListSoon() { clearTimeout(listTimer); listTimer = setTimeout(renderList, 500); }
 
-function groupLabel(text) {
-  const h = document.createElement('div');
-  h.className = 'group-label';
-  h.textContent = text;
-  return h;
-}
-
 function listMessage(text) {
   const p = document.createElement('p');
   p.className = 'list-empty';
@@ -339,6 +332,7 @@ function noteRow(n) {
   const b = document.createElement('button');
   b.className = 'item' + (n.id === currentId ? ' on' : '');
   b.dataset.id = n.id;
+  b.draggable = true;
 
   const t = document.createElement('div');
   t.className = 'item-t';
@@ -410,39 +404,25 @@ function renderList() {
       .filter(n => n.folder_id === currentFolder)
       .sort((a, b) => (Number(b.pinned) - Number(a.pinned)) || byRecency(a, b));
     if (!inside.length) {
-      el.list.append(listMessage('Pasta vazia. "Nova nota" cria uma aqui dentro.'));
+      el.list.append(listMessage('Pasta vazia. Arraste uma nota pra cá, ou use "Nova nota".'));
       return;
     }
     inside.forEach(n => el.list.append(noteRow(n)));
     return;
   }
 
-  // ── raiz: fixadas, depois pastas, depois notas soltas
+  // ── raiz: uma lista só. Fixadas no topo, pastas, depois o resto por recência.
   const pinned = notes.filter(n => n.pinned).sort(byRecency);
-  if (pinned.length) {
-    el.list.append(groupLabel('Fixadas'));
-    pinned.forEach(n => el.list.append(noteRow(n)));
-  }
+  const loose  = notes.filter(n => !n.folder_id && !n.pinned).sort(byRecency);
 
-  if (folders.length) {
-    el.list.append(groupLabel('Pastas'));
-    folders.forEach(f => el.list.append(folderRow(f)));
-  }
-
-  const loose = notes.filter(n => !n.folder_id && !n.pinned).sort(byRecency);
-  if (!loose.length) {
-    if (!pinned.length && !folders.length) el.list.append(listMessage('Nenhuma nota ainda.'));
+  if (!pinned.length && !folders.length && !loose.length) {
+    el.list.append(listMessage('Nenhuma nota ainda.'));
     return;
   }
 
-  const now = Date.now();
-  let group = null;
-  for (const n of loose) {
-    const age = now - Date.parse(n.updated_at);
-    const g = age < 86400e3 ? 'Hoje' : age < 604800e3 ? 'Últimos 7 dias' : 'Anteriores';
-    if (g !== group) { group = g; el.list.append(groupLabel(g)); }
-    el.list.append(noteRow(n));
-  }
+  pinned.forEach(n => el.list.append(noteRow(n)));
+  folders.forEach(f => el.list.append(folderRow(f)));
+  loose.forEach(n => el.list.append(noteRow(n)));
 }
 
 el.list.addEventListener('click', e => {
@@ -455,6 +435,85 @@ el.list.addEventListener('click', e => {
 });
 
 el.btnBack.addEventListener('click', () => { currentFolder = null; renderList(); });
+
+/* ── arrastar nota para dentro/fora de pasta ────────────── */
+
+let dragId = null;
+
+function moveNote(id, folderId) {
+  const n = noteById(id);
+  if (!n) return false;
+  const dest = folderId || null;
+  if ((n.folder_id || null) === dest) return false;
+  n.folder_id = dest;
+  n.updated_at = new Date().toISOString();
+  pendingN.set(n.id, n);
+  sortNotes(); saveCache(); renderList();
+  if (currentId === n.id) el.move.value = dest || '';
+  setSync('Salvando…');
+  flushSoon(200);
+  return true;
+}
+
+function clearDropHints() {
+  document.querySelectorAll('.drop-on').forEach(e => e.classList.remove('drop-on'));
+}
+
+el.list.addEventListener('dragstart', e => {
+  const row = e.target.closest('.item[data-id]');
+  if (!row) return;
+  dragId = row.dataset.id;
+  row.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', dragId);
+});
+
+el.list.addEventListener('dragend', () => {
+  dragId = null;
+  document.querySelectorAll('.dragging').forEach(e => e.classList.remove('dragging'));
+  clearDropHints();
+});
+
+el.list.addEventListener('dragover', e => {
+  const target = e.target.closest('.item.folder');
+  if (!target || !dragId) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  if (!target.classList.contains('drop-on')) {
+    clearDropHints();
+    target.classList.add('drop-on');
+  }
+});
+
+el.list.addEventListener('dragleave', e => {
+  const target = e.target.closest('.item.folder');
+  if (target && !target.contains(e.relatedTarget)) target.classList.remove('drop-on');
+});
+
+el.list.addEventListener('drop', e => {
+  const target = e.target.closest('.item.folder');
+  if (!target || !dragId) return;
+  e.preventDefault();
+  moveNote(dragId, target.dataset.folder);
+  dragId = null;
+  clearDropHints();
+});
+
+// dentro de uma pasta, soltar no "voltar" tira a nota da pasta
+el.btnBack.addEventListener('dragover', e => {
+  if (!dragId) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  el.btnBack.classList.add('drop-on');
+});
+el.btnBack.addEventListener('dragleave', () => el.btnBack.classList.remove('drop-on'));
+el.btnBack.addEventListener('drop', e => {
+  if (!dragId) return;
+  e.preventDefault();
+  moveNote(dragId, null);
+  dragId = null;
+  clearDropHints();
+});
 
 /* ── pastas ─────────────────────────────────────────────── */
 
@@ -524,14 +583,7 @@ el.btnDelFolder.addEventListener('click', () => {
 });
 
 el.move.addEventListener('change', () => {
-  const n = noteById(currentId);
-  if (!n) return;
-  n.folder_id = el.move.value || null;
-  n.updated_at = new Date().toISOString();
-  pendingN.set(n.id, n);
-  sortNotes(); saveCache(); renderList();
-  setSync('Salvando…');
-  flushSoon(200);
+  if (currentId) moveNote(currentId, el.move.value || null);
 });
 
 /* ── editor ─────────────────────────────────────────────── */
