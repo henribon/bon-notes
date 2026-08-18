@@ -16,9 +16,13 @@
 window.NOTAS_CONFIG = {
   SUPABASE_URL:      'https://flpvhqiicfecddrbcjtr.supabase.co',
   SUPABASE_ANON_KEY: 'sb_publishable_nxmlCCuezNJXp1YhmaFciw_5PGpxxS1',
-
-  // Opcional: só este email consegue usar o formulário de cadastro.
-  // É só uma trava de conveniência na interface — a trava de verdade
-  // é desligar "Allow new users to sign up" no painel do Supabase.
-  ALLOWED_EMAIL: 'henribonrec@gmail.com',
 };
+
+/* Não existe cadastro neste site — a tela de login só faz login.
+   Quem realmente bloqueia contas novas é o Supabase, em
+   Authentication → Sign In / Providers → "Allow new users to sign up"
+   DESLIGADO. Enquanto essa chave estiver ligada, qualquer pessoa pode
+   criar conta chamando a API direto, sem passar por esta página.
+
+   Precisa de outra conta algum dia? Crie pelo painel:
+   Authentication → Users → Add user. */

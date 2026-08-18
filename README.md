@@ -5,6 +5,7 @@ estático) com login de verdade e sincronização entre celular e computador via
 [Supabase](https://supabase.com) — plano grátis dá e sobra.
 
 - Markdown com preview (`Ctrl+E`)
+- Pastas e notas fixadas, convivendo no mesmo nível
 - Funciona offline: tudo fica no `localStorage` e sobe sozinho quando a rede volta
 - Sync ao vivo — editou no PC, aparece no celular sem recarregar
 - Tema claro / escuro / sistema
@@ -58,7 +59,6 @@ Abra [`assets/config.js`](assets/config.js) e cole as duas:
 window.NOTAS_CONFIG = {
   SUPABASE_URL:      'https://xxxx.supabase.co',
   SUPABASE_ANON_KEY: 'eyJhbGciOi...',
-  ALLOWED_EMAIL: 'seu@email.com',
 };
 ```
 
@@ -102,17 +102,39 @@ No GitHub: **Settings → Pages → Source: Deploy from a branch → `main` / `/
 
 ## 5. Criar sua conta e trancar a porta
 
-1. Abra o site, clique em **Criar conta**, use seu email e uma senha.
-2. Confirme pelo link que chega no email.
-3. Volte no Supabase: **Authentication → Sign In / Providers → Email** e
-   **desligue** `Allow new users to sign up`. → **Save**.
+O site **não tem tela de cadastro** — só login. A primeira conta você cria pelo
+painel do Supabase:
 
-Pronto: agora só a sua conta existe e ninguém mais consegue criar outra.
+1. **Authentication → Users → Add user → Create new user**.
+2. Preencha email e senha, e marque **Auto Confirm User**.
 
-### Enquanto estiver testando
+Agora tranque a porta, e este é o passo que importa:
 
-Se não quiser lidar com email de confirmação durante o setup, dá pra desligar
-`Confirm email` na mesma tela — só lembre de considerar religar depois.
+3. **Authentication → Sign In / Providers → Email** →
+   **desligue** `Allow new users to sign up` → **Save**.
+
+> Sem o passo 3, tirar o botão de cadastro do site não adianta nada: o endpoint
+> de signup do Supabase fica exposto na internet e qualquer pessoa cria conta
+> com um `curl`, sem nunca abrir sua página. Quem bloqueia é o servidor.
+
+Confirme que ficou trancado:
+
+```bash
+curl -s -X POST "https://xxxx.supabase.co/auth/v1/signup" -H "apikey: SUA-CHAVE-PUBLICA" -H "Content-Type: application/json" -d '{"email":"teste@example.com","password":"seja-o-que-for-123"}'
+```
+
+Tem que voltar um erro dizendo que signups estão desabilitados. Se voltar um
+usuário criado, o passo 3 não salvou — apague o usuário em **Authentication →
+Users** e tente de novo.
+
+### E se eu quiser convidar alguém um dia?
+
+Crie a conta da pessoa você mesmo em **Authentication → Users → Add user**. Isso
+mantém o cadastro fechado e você continua sendo quem decide quem entra. Um
+sistema de "código de convite" validado no navegador **não** funcionaria — o
+código estaria no JavaScript da página, visível pra qualquer um, e ainda assim
+daria pra pular a página e chamar a API direto. Código de convite de verdade
+exige uma Edge Function validando no servidor.
 
 ### Deixar o Supabase aceitar seu domínio
 
@@ -151,6 +173,7 @@ Depois abra `http://localhost:8080`. Adicione `http://localhost:8080` nas
 | `Ctrl/Cmd + K` | Buscar |
 | `Ctrl/Cmd + Shift + J` | Nova nota |
 | `Ctrl/Cmd + E` | Alternar preview do markdown |
+| `Ctrl/Cmd + D` | Fixar / desafixar a nota aberta |
 | `Ctrl/Cmd + S` | Forçar sincronização |
 | `Tab` (no corpo) | Indenta dois espaços |
 | `Esc` (na busca) | Limpa a busca |
@@ -164,10 +187,34 @@ index.html               estrutura das três telas: setup, login, app
 assets/styles.css        todo o visual, tokens de tema no topo
 assets/app.js            estado, sync, editor, autenticação
 assets/config.js         suas duas chaves — o único arquivo que você edita
-schema.sql               tabela + políticas de RLS + realtime
+schema.sql               tabelas + políticas de RLS + realtime
 sw.js                    cache da casca do app pra funcionar offline
 manifest.webmanifest     metadados do PWA
 ```
+
+## Pastas e notas fixadas
+
+Pastas e notas moram no mesmo nível da barra lateral. Uma nota com `folder_id`
+nulo aparece na raiz, ao lado das pastas; uma nota com `folder_id` preenchido
+some da raiz e passa a viver dentro da pasta.
+
+Na prática: com as notas X, Y e Z, criar a pasta `AQUI` e mover X pra ela deixa a
+raiz com `AQUI`, `Y` e `Z`. Abrindo `AQUI`, você vê só o X.
+
+- **Criar pasta:** botão de pasta ao lado de "Nova nota".
+- **Mover uma nota:** com a nota aberta, use o seletor no topo do editor.
+- **Criar já dentro:** abra a pasta e clique em "Nova nota".
+- **Renomear / excluir:** entre na pasta — os botões aparecem no topo da lista.
+
+Excluir uma pasta **não apaga as notas de dentro** — elas voltam pra raiz. Isso
+vale tanto no app quanto no banco (`on delete set null` na coluna `folder_id`),
+então nem um acidente pelo painel do Supabase leva suas notas junto.
+
+Notas fixadas (`★`, ou `Ctrl+D`) sobem para uma seção **Fixadas** no topo da
+raiz — inclusive as que estão dentro de pastas, que é justamente a graça de
+fixar. Dentro de uma pasta, as fixadas ficam no topo daquela pasta.
+
+A busca ignora a navegação atual e a pasta: ela procura em tudo, sempre.
 
 ## Sobre a sincronização
 
@@ -190,3 +237,34 @@ isso é suficiente; não é o algoritmo do Google Docs.
 efetivamente ilimitado. O único detalhe: projetos sem nenhum acesso por **7 dias
 seguidos** entram em pausa e você precisa reativar com um clique no painel. Se
 você usa as notas toda semana, nunca vai esbarrar nisso.
+
+## Segurança: o que protege o quê
+
+| Camada | Onde roda | O que faz |
+| --- | --- | --- |
+| Senha | Servidor Supabase | Guardada só como hash bcrypt. Não passa pelo código deste site nem pelo repositório. |
+| HTTPS | GitHub Pages + Supabase | Ambos forçam TLS. Ninguém lê sua senha na rede, nem em Wi-Fi público. |
+| RLS | Servidor Supabase | Cada linha da tabela só é legível pelo dono. É o que impede a chave pública de virar chave-mestra. |
+| Signup desligado | Servidor Supabase | Impede contas novas, inclusive por chamada direta na API. |
+| SRI | Navegador | Os `<script>` de CDN têm hash `integrity`. Se o arquivo mudar um byte, o navegador se recusa a executar. |
+| DOMPurify | Navegador | Limpa o HTML gerado do markdown antes de exibir. |
+
+### O que ainda depende de você
+
+1. **A força da sua senha.** O endpoint de login é público — dá pra tentar
+   adivinhar de fora. O Supabase limita a taxa de tentativas, mas quem decide se
+   é inviável ou não é o tamanho da senha. Use algo longo e exclusivo deste site.
+2. **Ative MFA** em **Authentication → Multi-Factor**. Com isso, saber a senha
+   deixa de ser suficiente.
+3. **Proteja seu Gmail.** O "esqueci a senha" manda um link pra lá. Na prática,
+   quem controla seu email controla esta conta — 2FA no Gmail vale mais aqui do
+   que qualquer coisa neste repositório.
+4. **Cuidado com o aparelho.** A sessão fica no `localStorage`. Quem destrava seu
+   celular ou seu PC entra sem senha nenhuma. Use **Sair** em máquina emprestada.
+
+### O que um estranho consegue ver
+
+Abrindo seu site e o DevTools, qualquer pessoa vê a URL do projeto e a chave
+pública. Com elas ela consegue exatamente uma coisa: bater na API como visitante
+anônimo. Com o RLS ligado e o signup desligado, isso rende `[]` e uma mensagem de
+erro. É o desenho esperado, não uma falha.
