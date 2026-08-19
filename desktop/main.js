@@ -14,6 +14,11 @@ const HOTKEY = 'Control+Alt+N';
 let win = null;
 let tray = null;
 let saindo = false;
+let carregadoEm = 0;
+
+// Janela escondida na bandeja não recarrega sozinha. Se ficou guardada
+// por mais que isso, busca versão nova ao reaparecer.
+const VALIDADE_MS = 5 * 60 * 1000;
 
 /* ── tamanho e posição da janela entre sessões ───────────── */
 
@@ -83,6 +88,7 @@ function criarJanela() {
   win.loadURL(SITE);
 
   win.once('ready-to-show', () => win.show());
+  win.webContents.on('did-finish-load', () => { carregadoEm = Date.now(); });
 
   win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     if (isMainFrame && code !== -3) {          // -3 = abortado pelo próprio app
@@ -120,6 +126,13 @@ function alternarJanela() {
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
+  if (carregadoEm && Date.now() - carregadoEm > VALIDADE_MS) atualizar();
+}
+
+function atualizar() {
+  if (!win || win.isDestroyed()) return;
+  carregadoEm = Date.now();                    // evita recarregar em rajada
+  win.webContents.reloadIgnoringCache();
 }
 
 /* ── bandeja ────────────────────────────────────────────── */
@@ -139,7 +152,7 @@ function criarBandeja() {
     },
     { label: 'Abrir no navegador', click: () => shell.openExternal(SITE) },
     { type: 'separator' },
-    { label: 'Recarregar', click: () => win && win.webContents.reload() },
+    { label: 'Buscar atualização', click: atualizar },
     { label: `Mostrar/ocultar  (${HOTKEY.replace(/Control/, 'Ctrl')})`, enabled: false },
     { type: 'separator' },
     { label: 'Sair', click: () => { saindo = true; app.quit(); } },

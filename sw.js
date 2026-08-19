@@ -38,8 +38,11 @@ self.addEventListener('fetch', e => {
   if (url.origin !== self.location.origin) return;   // CDN e Supabase passam direto
 
   // Rede primeiro (pra pegar deploys novos), cache como rede de segurança.
+  // `no-cache` não desliga o cache: manda revalidar sempre. O servidor
+  // responde 304 quando nada mudou, então continua barato — mas some a
+  // janela de 10 minutos em que o GitHub Pages servia arquivo velho.
   e.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-cache' })
       .then(res => {
         const copy = res.clone();
         caches.open(VERSION).then(c => c.put(req, copy)).catch(() => {});

@@ -181,13 +181,28 @@ Sai em `desktop/dist/`:
 
 | Arquivo | O que é |
 | --- | --- |
-| `Notas-Setup-1.0.0.exe` | Instalador. Cria atalhos e permite escolher a pasta. |
-| `Notas-portatil-1.0.0.exe` | Roda direto, sem instalar. |
+| `Notas-Setup-1.1.0.exe` | Instalador. Cria atalhos e permite escolher a pasta. |
+| `Notas-portatil-1.1.0.exe` | Roda direto, sem instalar. |
 
 **A casca não guarda cópia do app.** Ela carrega o mesmo endereço do GitHub
 Pages, então todo push atualiza o executável sozinho — você só reinstala se
 mudar o `desktop/main.js`. O service worker do site é quem cuida do offline: só
 a primeira abertura precisa de internet.
+
+### Como a atualização chega até ele
+
+O `X` esconde na bandeja em vez de fechar, então a janela pode ficar dias com a
+mesma página carregada. Três mecanismos evitam que ela envelheça:
+
+- O service worker revalida cada arquivo em vez de confiar no `max-age=600` do
+  GitHub Pages. O servidor responde `304` quando nada mudou, então o custo é
+  baixo e não existe janela de 10 minutos servindo versão velha.
+- A página se recarrega sozinha quando um service worker novo assume — e, se
+  houver edição pendente, envia antes de recarregar.
+- A casca busca versão nova ao reaparecer da bandeja depois de 5 minutos
+  escondida, ignorando o cache.
+
+Se quiser forçar na hora: bandeja → **Buscar atualização**.
 
 Para apontar pra outro endereço (testar local, por exemplo):
 

@@ -1459,7 +1459,28 @@ boot().catch(err => {
 });
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  const jaControlada = !!navigator.serviceWorker.controller;
+  let recarregando = false;
+
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('sw.js');
+      const procurar = () => { reg.update().catch(() => {}); };
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) procurar(); });
+      window.addEventListener('focus', procurar);
+      setInterval(procurar, 15 * 60 * 1000);
+    } catch (e) { /* sem service worker: o app funciona igual, só não cacheia */ }
+  });
+
+  // Um service worker novo assumindo significa versão nova publicada.
+  // Recarrega para o usuário não ficar preso numa janela aberta há dias
+  // — mas só com tudo salvo, para não atropelar edição em andamento.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!jaControlada || recarregando) return;
+    if (pendingCount()) { flush().then(() => { recarregando = true; location.reload(); }); return; }
+    recarregando = true;
+    location.reload();
+  });
 }
 
 })();

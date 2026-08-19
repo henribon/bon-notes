@@ -1,7 +1,7 @@
 {
   "name": "notas-desktop",
   "productName": "Notas",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Casca desktop do Notas para Windows",
   "main": "main.js",
   "author": "henribon",
