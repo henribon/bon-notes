@@ -1,5 +1,6 @@
 {
   "name": "notas-desktop",
+  "productName": "Notas",
   "version": "1.0.0",
   "description": "Casca desktop do Notas para Windows",
   "main": "main.js",
@@ -23,12 +24,25 @@
       "output": "dist",
       "buildResources": "build"
     },
-    "files": ["main.js", "build/icon.ico"],
+    "files": [
+      "main.js",
+      "build/icon.ico"
+    ],
     "win": {
       "icon": "build/icon.ico",
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "nsis": {
