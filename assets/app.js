@@ -24,6 +24,7 @@ const el = {
   title: $('title'), content: $('content'), preview: $('preview'),
   move: $('move'), btnPin: $('btn-pin'),
   btnPreview: $('btn-preview'), btnDelete: $('btn-delete'),
+  menu: $('menu'),
 };
 
 const LS = { cache: 'notas:cache', theme: 'notas:theme', last: 'notas:last' };
@@ -426,6 +427,7 @@ function renderList() {
 }
 
 el.list.addEventListener('click', e => {
+  if (swallowClick) { swallowClick = false; return; }
   const f = e.target.closest('.item.folder');
   if (f) { currentFolder = f.dataset.folder; el.search.value = ''; renderList(); return; }
   const b = e.target.closest('.item');
@@ -547,8 +549,8 @@ el.btnNewFolder.addEventListener('click', () => {
   flushSoon(300);
 });
 
-el.btnRenameFolder.addEventListener('click', () => {
-  const f = folderById(currentFolder);
+function renameFolder(id) {
+  const f = folderById(id);
   if (!f) return;
   const name = (prompt('Novo nome da pasta:', f.name) || '').trim();
   if (!name || name === f.name) return;
@@ -557,10 +559,11 @@ el.btnRenameFolder.addEventListener('click', () => {
   pendingF.set(f.id, f);
   sortFolders(); saveCache(); syncMoveOptions(); renderList();
   flushSoon(300);
-});
+}
+el.btnRenameFolder.addEventListener('click', () => renameFolder(currentFolder));
 
-el.btnDelFolder.addEventListener('click', () => {
-  const f = folderById(currentFolder);
+function deleteFolder(id) {
+  const f = folderById(id);
   if (!f) return;
   const inside = notes.filter(n => n.folder_id === f.id);
   const aviso = inside.length
@@ -577,14 +580,146 @@ el.btnDelFolder.addEventListener('click', () => {
   folders = folders.filter(x => x.id !== f.id);
   pendingF.delete(f.id);
   deletingF.add(f.id);
-  currentFolder = null;
+  if (currentFolder === f.id) currentFolder = null;
   saveCache(); syncMoveOptions(); renderList();
   flush();
-});
+}
+el.btnDelFolder.addEventListener('click', () => deleteFolder(currentFolder));
 
 el.move.addEventListener('change', () => {
   if (currentId) moveNote(currentId, el.move.value || null);
 });
+
+/* ── menu de contexto (botão direito / toque longo) ─────── */
+
+function closeMenu() {
+  if (el.menu.hidden) return;
+  el.menu.hidden = true;
+  el.menu.replaceChildren();
+}
+
+function openMenu(x, y, items) {
+  el.menu.replaceChildren();
+
+  for (const it of items) {
+    if (it.sep) {
+      const d = document.createElement('div');
+      d.className = 'menu-sep';
+      el.menu.append(d);
+      continue;
+    }
+    if (it.head) {
+      const h = document.createElement('div');
+      h.className = 'menu-head';
+      h.textContent = it.head;
+      el.menu.append(h);
+      continue;
+    }
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'menu-item' + (it.danger ? ' danger' : '');
+    b.setAttribute('role', 'menuitem');
+    if (it.icon) b.append(icon(it.icon));
+    const l = document.createElement('span');
+    l.className = 'label';
+    l.textContent = it.label;
+    b.append(l);
+    if (it.checked) {
+      const t = document.createElement('span');
+      t.className = 'tick';
+      t.textContent = '✓';
+      b.append(t);
+    }
+    if (it.disabled) b.disabled = true;
+    else b.addEventListener('click', () => { closeMenu(); it.run(); });
+    el.menu.append(b);
+  }
+
+  // mede escondido no canto, depois encaixa dentro da janela
+  el.menu.style.left = '0px';
+  el.menu.style.top = '0px';
+  el.menu.hidden = false;
+  const r = el.menu.getBoundingClientRect();
+  el.menu.style.left = Math.max(8, Math.min(x, window.innerWidth  - r.width  - 8)) + 'px';
+  el.menu.style.top  = Math.max(8, Math.min(y, window.innerHeight - r.height - 8)) + 'px';
+}
+
+function menuForRow(row, x, y) {
+  if (row.classList.contains('folder')) {
+    const f = folderById(row.dataset.folder);
+    if (!f) return;
+    openMenu(x, y, [
+      { label: 'Abrir pasta', icon: FOLDER_ICON,
+        run: () => { currentFolder = f.id; el.search.value = ''; renderList(); closeDrawer(); } },
+      { sep: true },
+      { label: 'Renomear', run: () => renameFolder(f.id) },
+      { label: 'Excluir pasta', danger: true, run: () => deleteFolder(f.id) },
+    ]);
+    return;
+  }
+
+  const n = noteById(row.dataset.id);
+  if (!n) return;
+
+  const items = [
+    { label: n.pinned ? 'Desafixar' : 'Fixar no topo', run: () => togglePin(n.id) },
+    { label: 'Duplicar', run: () => duplicateNote(n.id) },
+    { sep: true },
+    { head: 'Mover para' },
+    { label: 'Sem pasta', checked: !n.folder_id, run: () => moveNote(n.id, null) },
+  ];
+  if (!folders.length) {
+    items.push({ label: 'Nenhuma pasta criada ainda', disabled: true });
+  } else {
+    for (const f of folders) {
+      items.push({
+        label: (f.name || '').trim() || 'Sem nome',
+        icon: FOLDER_ICON,
+        checked: n.folder_id === f.id,
+        run: () => moveNote(n.id, f.id),
+      });
+    }
+  }
+  items.push({ sep: true }, { label: 'Excluir nota', danger: true, run: () => deleteNote(n.id) });
+
+  openMenu(x, y, items);
+}
+
+el.list.addEventListener('contextmenu', e => {
+  const row = e.target.closest('.item');
+  if (!row) return;
+  e.preventDefault();
+  menuForRow(row, e.clientX, e.clientY);
+});
+
+// toque longo no celular, onde não existe botão direito
+let pressTimer = null;
+let swallowClick = false;
+
+el.list.addEventListener('touchstart', e => {
+  const row = e.target.closest('.item');
+  if (!row || e.touches.length !== 1) return;
+  const t = e.touches[0];
+  clearTimeout(pressTimer);
+  pressTimer = setTimeout(() => {
+    swallowClick = true;
+    setTimeout(() => { swallowClick = false; }, 800);   // não come um clique legítimo depois
+    if (navigator.vibrate) navigator.vibrate(12);
+    menuForRow(row, t.clientX, t.clientY);
+  }, 480);
+}, { passive: true });
+
+const cancelPress = () => clearTimeout(pressTimer);
+el.list.addEventListener('touchmove', cancelPress, { passive: true });
+el.list.addEventListener('touchend', cancelPress);
+el.list.addEventListener('touchcancel', cancelPress);
+el.list.addEventListener('scroll', closeMenu, { passive: true });
+
+document.addEventListener('pointerdown', e => {
+  if (!el.menu.hidden && !el.menu.contains(e.target)) closeMenu();
+}, true);
+window.addEventListener('resize', closeMenu);
+window.addEventListener('blur', closeMenu);
 
 /* ── editor ─────────────────────────────────────────────── */
 
@@ -668,18 +803,56 @@ el.content.addEventListener('keydown', e => {
   }
 });
 
-function togglePin() {
-  const n = noteById(currentId);
+function togglePin(id) {
+  const n = noteById(id || currentId);
   if (!n) return;
   n.pinned = !n.pinned;
   n.updated_at = new Date().toISOString();
   pendingN.set(n.id, n);
-  paintPin(n);
+  if (n.id === currentId) paintPin(n);
   sortNotes(); saveCache(); renderList();
   setSync('Salvando…');
   flushSoon(200);
 }
-el.btnPin.addEventListener('click', togglePin);
+el.btnPin.addEventListener('click', () => togglePin(currentId));
+
+function duplicateNote(id) {
+  const src = noteById(id);
+  if (!src || !user) return;
+  const now = new Date().toISOString();
+  const copy = {
+    id: crypto.randomUUID(), user_id: user.id,
+    title: (src.title || '').trim() ? src.title + ' (cópia)' : '',
+    content: src.content, folder_id: src.folder_id || null, pinned: false,
+    created_at: now, updated_at: now,
+  };
+  notes.unshift(copy);
+  pendingN.set(copy.id, copy);
+  saveCache();
+  openNote(copy.id);
+  flushSoon(300);
+}
+
+function deleteNote(id) {
+  const n = noteById(id);
+  if (!n) return;
+  if (!confirm('Excluir ' + ((n.title || '').trim() || 'esta nota') + '? Não dá pra desfazer.')) return;
+
+  const wasIn = n.folder_id || null;
+  const eraAberta = n.id === currentId;
+  notes = notes.filter(x => x.id !== n.id);
+  pendingN.delete(n.id);
+  deletingN.add(n.id);
+  saveCache();
+
+  if (eraAberta) {
+    const pool = notes.filter(x => (x.folder_id || null) === wasIn);
+    openNote(pool.length ? pool[0].id : (notes[0] ? notes[0].id : null));
+  } else {
+    renderList();
+  }
+  flush();
+}
 
 function newNote() {
   if (!user) return;
@@ -700,21 +873,7 @@ function newNote() {
 el.btnNew.addEventListener('click', newNote);
 el.btnNew2.addEventListener('click', newNote);
 
-el.btnDelete.addEventListener('click', () => {
-  const n = noteById(currentId);
-  if (!n) return;
-  if (!confirm('Excluir ' + ((n.title || '').trim() || 'esta nota') + '? Não dá pra desfazer.')) return;
-
-  const wasIn = n.folder_id || null;
-  notes = notes.filter(x => x.id !== n.id);
-  pendingN.delete(n.id);
-  deletingN.add(n.id);
-  saveCache();
-
-  const pool = notes.filter(x => (x.folder_id || null) === wasIn);
-  openNote(pool.length ? pool[0].id : (notes[0] ? notes[0].id : null));
-  flush();
-});
+el.btnDelete.addEventListener('click', () => deleteNote(currentId));
 
 function setPreview(on) {
   previewOn = on;
@@ -733,6 +892,7 @@ el.btnPreview.addEventListener('click', () => setPreview(!previewOn));
 
 window.addEventListener('scroll', () => {
   el.edHead.classList.toggle('scrolled', window.scrollY > 4);
+  closeMenu();
 }, { passive: true });
 
 window.addEventListener('resize', () => {
@@ -765,13 +925,14 @@ el.scrim.addEventListener('click', closeDrawer);
 /* ── atalhos ────────────────────────────────────────────── */
 
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !el.menu.hidden) { closeMenu(); return; }
   const mod = e.metaKey || e.ctrlKey;
   if (!mod) return;
   const k = e.key.toLowerCase();
   if (k === 'k') { e.preventDefault(); openDrawer(); el.search.focus(); el.search.select(); }
   else if (k === 's') { e.preventDefault(); flush(); }
   else if (k === 'e' && currentId) { e.preventDefault(); setPreview(!previewOn); }
-  else if (k === 'd' && currentId) { e.preventDefault(); togglePin(); }
+  else if (k === 'd' && currentId) { e.preventDefault(); togglePin(currentId); }
   else if (k === 'j' && e.shiftKey) { e.preventDefault(); newNote(); }
 });
 

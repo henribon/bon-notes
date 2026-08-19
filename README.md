@@ -153,6 +153,63 @@ Abre em tela cheia, sem barra de navegador, e continua funcionando sem internet.
 
 ---
 
+## App de Windows
+
+Existem dois caminhos, e o mais simples talvez já resolva.
+
+### Caminho A — instalar o site como app (10 segundos, nada pra compilar)
+
+No Edge: abra o site → menu `···` → **Aplicativos** → **Instalar este site como um
+aplicativo**. No Chrome é o ícone de instalar na barra de endereço.
+
+Você ganha janela própria sem barra de navegador, ícone no menu Iniciar,
+fixável na barra de tarefas e funcionamento offline. É o mesmo app, então
+atualiza sozinho a cada push.
+
+### Caminho B — o executável (`desktop/`)
+
+Uma casca Electron que acrescenta o que um PWA não faz: **ícone na bandeja**,
+**atalho global `Ctrl+Alt+N`** para chamar de qualquer lugar, **iniciar junto com
+o Windows** e um `.exe` portátil que roda de pendrive.
+
+```bash
+cd desktop && npm install && npm run build
+```
+
+Sai em `desktop/dist/`:
+
+| Arquivo | O que é |
+| --- | --- |
+| `Notas-Setup-1.0.0.exe` | Instalador. Cria atalhos e permite escolher a pasta. |
+| `Notas-portatil-1.0.0.exe` | Roda direto, sem instalar. |
+
+**A casca não guarda cópia do app.** Ela carrega o mesmo endereço do GitHub
+Pages, então todo push atualiza o executável sozinho — você só reinstala se
+mudar o `desktop/main.js`. O service worker do site é quem cuida do offline: só
+a primeira abertura precisa de internet.
+
+Para apontar pra outro endereço (testar local, por exemplo):
+
+```bash
+cd desktop && set NOTAS_URL=http://localhost:8080 && npm start
+```
+
+**Sobre a sincronização:** as três versões — web, celular e desktop — falam com
+o mesmo Supabase, então nota escrita em qualquer uma aparece nas outras. O
+desktop tem armazenamento próprio, separado do seu navegador, então você faz
+login uma vez nele.
+
+**Sobre o aviso do Windows:** o `.exe` não é assinado digitalmente (um
+certificado custa algumas centenas de dólares por ano). Na primeira execução o
+SmartScreen mostra "Windows protegeu o computador" — clique em **Mais
+informações** → **Executar assim mesmo**. Só na primeira vez.
+
+O `X` fecha para a bandeja em vez de encerrar, pra reabrir instantâneo e manter
+a sincronização viva. Para sair de verdade, botão direito no ícone da bandeja →
+**Sair**.
+
+---
+
 ## Rodar local antes de publicar
 
 O service worker e o login precisam de `http://`, não de `file://`:
@@ -190,6 +247,8 @@ assets/config.js         suas duas chaves — o único arquivo que você edita
 schema.sql               tabelas + políticas de RLS + realtime
 sw.js                    cache da casca do app pra funcionar offline
 manifest.webmanifest     metadados do PWA
+desktop/main.js          casca Electron do app de Windows
+desktop/package.json     dependências e config do instalador
 ```
 
 ## Pastas e notas fixadas
@@ -206,13 +265,25 @@ A ordem é: fixadas no topo, pastas em seguida, depois as notas soltas por
 recência.
 
 - **Criar pasta:** botão de pasta ao lado de "Nova nota".
-- **Mover uma nota:** arraste ela pra cima da pasta. Com a nota aberta, o
-  seletor no topo do editor faz o mesmo — é o caminho no celular, onde arrastar
-  não funciona.
-- **Tirar da pasta:** entre na pasta e arraste a nota pro botão de voltar. Ou
-  escolha "Sem pasta" no seletor.
+- **Mover uma nota:** arraste pra cima da pasta, ou use o menu de contexto, ou o
+  seletor no topo do editor.
+- **Tirar da pasta:** arraste pro botão de voltar, ou escolha "Sem pasta".
 - **Criar já dentro:** abra a pasta e clique em "Nova nota".
-- **Renomear / excluir:** entre na pasta — os botões aparecem no topo da lista.
+- **Renomear / excluir:** pelo menu de contexto, ou pelos botões que aparecem no
+  topo da lista quando você entra na pasta.
+
+## Menu de contexto
+
+**Botão direito** numa nota ou pasta da barra lateral. No celular, **toque longo**
+(meio segundo) faz o mesmo — é por lá que se move nota sem arrastar, já que a API
+de drag-and-drop do HTML não responde a toque.
+
+Numa nota: fixar/desafixar, duplicar, mover para qualquer pasta (com ✓ na atual),
+excluir. Numa pasta: abrir, renomear, excluir.
+
+O menu age sobre o item que você clicou, não sobre a nota aberta no editor — dá
+pra mover ou excluir uma nota sem sair da que está escrevendo. Fecha com `Esc`,
+clique fora, ou ao rolar a página.
 
 Excluir uma pasta **não apaga as notas de dentro** — elas voltam pra raiz. Isso
 vale tanto no app quanto no banco (`on delete set null` na coluna `folder_id`),

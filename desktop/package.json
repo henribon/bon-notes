@@ -1,0 +1,47 @@
+{
+  "name": "notas-desktop",
+  "version": "1.0.0",
+  "description": "Casca desktop do Notas para Windows",
+  "main": "main.js",
+  "author": "henribon",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win",
+    "build:portable": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.henribon.notas",
+    "productName": "Notas",
+    "copyright": "henribon",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": ["main.js", "build/icon.ico"],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Notas",
+      "artifactName": "Notas-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Notas-portatil-${version}.${ext}"
+    }
+  }
+}
