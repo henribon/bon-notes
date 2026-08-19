@@ -4,8 +4,9 @@ Bloco de notas pessoal, minimalista, estilo Notion. Roda no GitHub Pages (site
 estático) com login de verdade e sincronização entre celular e computador via
 [Supabase](https://supabase.com) — plano grátis dá e sobra.
 
-- Markdown com preview (`Ctrl+E`)
+- Markdown com barra de formatação e preview (`Ctrl+E`)
 - Pastas e notas fixadas, convivendo no mesmo nível
+- Cores por nota e por pasta, anexos e callouts
 - Funciona offline: tudo fica no `localStorage` e sobe sozinho quando a rede volta
 - Sync ao vivo — editou no PC, aparece no celular sem recarregar
 - Tema claro / escuro / sistema
@@ -208,6 +209,28 @@ O `X` fecha para a bandeja em vez de encerrar, pra reabrir instantâneo e manter
 a sincronização viva. Para sair de verdade, botão direito no ícone da bandeja →
 **Sair**.
 
+**Primeiro login no desktop:** ele tem armazenamento próprio, separado do
+navegador, então pede email e senha uma vez. A primeira sincronização demora
+alguns segundos porque baixa tudo sem cache local; depois disso abre na hora.
+
+### Se o build falhar em "Cannot create symbolic link"
+
+O `electron-builder` baixa um pacote de ferramentas de assinatura que traz
+bibliotecas de macOS guardadas como links simbólicos. Criar link simbólico no
+Windows exige um privilégio que contas comuns só têm com o Modo de Desenvolvedor
+ligado — sem ele o build gera `dist/win-unpacked/` mas não os instaladores.
+
+Extraia o pacote a mão pulando a pasta `darwin`, que é a única com symlinks e não
+serve pra nada num build de Windows:
+
+```bash
+CACHE="$LOCALAPPDATA/electron-builder/Cache/winCodeSign" && rm -rf "$CACHE"/[0-9]*/ && desktop/node_modules/7zip-bin/win/x64/7za.exe x "$CACHE"/*.7z -o"$CACHE/winCodeSign-2.6.0" -xr'!'darwin -y
+```
+
+Depois `npm run build` de novo. A alternativa é ligar o Modo de Desenvolvedor em
+**Configurações → Sistema → Para desenvolvedores**, que também resolve, mas mexe
+na máquina em vez de no projeto.
+
 ---
 
 ## Rodar local antes de publicar
@@ -231,6 +254,10 @@ Depois abra `http://localhost:8080`. Adicione `http://localhost:8080` nas
 | `Ctrl/Cmd + Shift + J` | Nova nota |
 | `Ctrl/Cmd + E` | Alternar preview do markdown |
 | `Ctrl/Cmd + D` | Fixar / desafixar a nota aberta |
+| `Ctrl/Cmd + B` | Negrito |
+| `Ctrl/Cmd + I` | Itálico |
+| `Ctrl/Cmd + 1/2/3` | Título grande / médio / pequeno |
+| `Ctrl/Cmd + Shift + K` | Inserir link |
 | `Ctrl/Cmd + S` | Forçar sincronização |
 | `Tab` (no corpo) | Indenta dois espaços |
 | `Esc` (na busca) | Limpa a busca |
@@ -271,6 +298,72 @@ recência.
 - **Criar já dentro:** abra a pasta e clique em "Nova nota".
 - **Renomear / excluir:** pelo menu de contexto, ou pelos botões que aparecem no
   topo da lista quando você entra na pasta.
+
+## Cores
+
+Botão direito numa nota ou pasta → seção **Cor**. São nove opções (padrão mais
+oito), e a cor tinge o título na barra lateral — e o ícone, no caso das pastas.
+Cada tom tem uma versão para o tema claro e outra para o escuro, então o
+contraste se mantém dos dois lados.
+
+A cor fica no banco, junto da nota, então acompanha você entre web, celular e
+desktop. Só valores da paleta viram CSS: qualquer coisa diferente disso é
+ignorada em vez de virar estilo.
+
+## Escrevendo: a barra de formatação
+
+Aparece acima do texto quando há nota aberta, e some no preview.
+
+| Botão | O que faz |
+| --- | --- |
+| **B** / *I* / ~~S~~ / `</>` | Negrito, itálico, riscado, código na linha |
+| H1 H2 H3 | Tamanho do título |
+| • / 1. / ☐ / ” | Lista, lista numerada, caixa de seleção, citação |
+| { } | Bloco de código |
+| ⓘ | Callout |
+| 🔗 / — | Link, linha divisória |
+| 📎 | Anexar arquivo |
+
+Clicar de novo desfaz. Negrito e itálico se combinam sem se atrapalhar: `**x**`
+com itálico vira `***x***`, e tirar o itálico devolve `**x**` com o negrito
+intacto.
+
+Nada disso inventa formato próprio — tudo continua sendo markdown comum, então
+suas notas seguem legíveis fora daqui.
+
+## Callouts
+
+Blocos de destaque, na sintaxe de alertas do GitHub:
+
+```markdown
+> [!NOTA]
+> Isso aparece num bloco azul com ícone.
+```
+
+Valem `NOTA`, `DICA`, `IMPORTANTE`, `ATENCAO` e `CUIDADO` — e também os nomes em
+inglês (`NOTE`, `TIP`, `IMPORTANT`, `WARNING`, `CAUTION`). Cada um tem cor e
+ícone próprios. Citação sem marcador continua sendo citação normal.
+
+## Anexos
+
+Três formas de anexar: o botão 📎, arrastar o arquivo pra cima da nota, ou colar
+direto (`Ctrl+V`) com o arquivo na área de transferência. Imagens aparecem
+inline no preview; o resto vira um cartão clicável.
+
+Limite de 25 MB por arquivo. O plano grátis do Supabase dá 1 GB no total.
+
+Os arquivos ficam num balde **privado** chamado `anexos`, e cada um mora numa
+pasta com o id do dono — a política de acesso confere isso a cada leitura. Não
+existe link público: o app gera uma URL assinada de 1 hora na hora de exibir. Se
+alguém copiar essa URL, ela expira sozinha.
+
+No markdown o anexo fica como `![nome](anexo:CAMINHO)`. Esse `anexo:` é um
+esquema interno, trocado pela URL assinada só na exibição — é por isso que o
+texto da nota não guarda link que vaza.
+
+> Excluir uma nota **não** apaga os arquivos que ela referenciava. Eles
+> continuam no balde ocupando espaço. Se isso incomodar, dá pra limpar pelo
+> painel do Supabase em **Storage → anexos**.
 
 ## Menu de contexto
 

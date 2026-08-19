@@ -24,12 +24,21 @@ const el = {
   title: $('title'), content: $('content'), preview: $('preview'),
   move: $('move'), btnPin: $('btn-pin'),
   btnPreview: $('btn-preview'), btnDelete: $('btn-delete'),
-  menu: $('menu'),
+  menu: $('menu'), fmt: $('fmt'), arquivo: $('arquivo'),
 };
 
 const LS = { cache: 'notas:cache', theme: 'notas:theme', last: 'notas:last' };
-const NCOLS = ['id', 'user_id', 'title', 'content', 'folder_id', 'pinned', 'created_at', 'updated_at'];
-const FCOLS = ['id', 'user_id', 'name', 'created_at', 'updated_at'];
+const NCOLS = ['id', 'user_id', 'title', 'content', 'folder_id', 'pinned', 'color', 'created_at', 'updated_at'];
+const FCOLS = ['id', 'user_id', 'name', 'color', 'created_at', 'updated_at'];
+
+const CORES = [
+  { id: null, nome: 'Padrão' }, { id: 'vermelho', nome: 'Vermelho' },
+  { id: 'laranja', nome: 'Laranja' }, { id: 'amarelo', nome: 'Amarelo' },
+  { id: 'verde', nome: 'Verde' }, { id: 'azul', nome: 'Azul' },
+  { id: 'roxo', nome: 'Roxo' }, { id: 'rosa', nome: 'Rosa' },
+  { id: 'cinza', nome: 'Cinza' },
+];
+const corValida = c => CORES.some(x => x.id === c);
 
 let sb = null;
 let user = null;
@@ -98,6 +107,24 @@ function autoGrow(t) { t.style.height = 'auto'; t.style.height = t.scrollHeight 
 const SVGNS = 'http://www.w3.org/2000/svg';
 const FOLDER_ICON = 'M1.5 3.5A1.5 1.5 0 013 2h3.1a1.5 1.5 0 011.06.44L8.2 3.5H13a1.5 1.5 0 011.5 1.5v7A1.5 1.5 0 0113 13.5H3A1.5 1.5 0 011.5 12v-8.5z';
 
+function pintar(elm, cor) {
+  // só cores da paleta viram CSS — nunca o valor cru vindo do banco
+  if (corValida(cor) && cor) {
+    elm.dataset.color = cor;
+    elm.style.setProperty('--cor', 'var(--c-' + cor + ')');
+  } else {
+    delete elm.dataset.color;
+    elm.style.removeProperty('--cor');
+  }
+}
+
+function amostra(cor) {
+  const s = document.createElement('span');
+  s.className = 'swatch' + (cor ? '' : ' none');
+  if (corValida(cor) && cor) s.style.setProperty('--cor', 'var(--c-' + cor + ')');
+  return s;
+}
+
 function icon(path) {
   const s = document.createElementNS(SVGNS, 'svg');
   s.setAttribute('class', 'ic');
@@ -129,17 +156,111 @@ el.btnTheme.addEventListener('click', () => {
 
 if (window.marked) marked.setOptions({ gfm: true, breaks: true });
 
+// o padrão do DOMPurify mais o nosso esquema "anexo:" (resolvido depois
+// para uma URL assinada). Nada além disso é permitido.
+const URI_OK = /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|anexo):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+
 function renderMd(src) {
   const html = window.marked ? marked.parse(src || '') : '';
-  return window.DOMPurify ? DOMPurify.sanitize(html, { ADD_ATTR: ['target'] }) : html;
+  return window.DOMPurify
+    ? DOMPurify.sanitize(html, { ADD_ATTR: ['target'], ALLOWED_URI_REGEXP: URI_OK })
+    : html;
+}
+
+/* ── callouts: > [!NOTA] vira um bloco destacado ─────────── */
+
+const CALLOUTS = {
+  nota: ['nota', 'ℹ️', 'Nota'],            note: ['nota', 'ℹ️', 'Nota'],
+  dica: ['dica', '💡', 'Dica'],            tip: ['dica', '💡', 'Dica'],
+  importante: ['importante', '📌', 'Importante'],
+  important: ['importante', '📌', 'Importante'],
+  atencao: ['atencao', '⚠️', 'Atenção'],   warning: ['atencao', '⚠️', 'Atenção'],
+  cuidado: ['cuidado', '🛑', 'Cuidado'],   caution: ['cuidado', '🛑', 'Cuidado'],
+};
+
+function primeiroTexto(no) {
+  // pula a quebra de linha entre <blockquote> e <p>: o marcador
+  // mora no primeiro texto com conteudo de verdade
+  const w = document.createTreeWalker(no, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = w.nextNode())) if (n.data.trim()) return n;
+  return null;
+}
+
+function montarCallouts(raiz) {
+  raiz.querySelectorAll('blockquote').forEach(bq => {
+    const tn = primeiroTexto(bq);
+    if (!tn) return;
+    const m = tn.data.match(/^\s*\[!([\wÀ-ÿ]+)\]\s*/);
+    if (!m) return;
+    const def = CALLOUTS[fold(m[1])];
+    if (!def) return;
+
+    tn.data = tn.data.slice(m[0].length);        // tira só o marcador, preserva a formatação
+    const p1 = tn.parentElement;
+    if (p1 && !p1.textContent.trim() && !p1.querySelector('img')) p1.remove();
+
+    const box = document.createElement('div');
+    box.className = 'callout ' + def[0];
+    const ic = document.createElement('div');
+    ic.className = 'callout-ic';
+    ic.textContent = def[1];
+    const corpo = document.createElement('div');
+    corpo.className = 'callout-body';
+    const tit = document.createElement('div');
+    tit.className = 'callout-title';
+    tit.textContent = def[2];
+    corpo.append(tit, ...bq.childNodes);
+    box.append(ic, corpo);
+    bq.replaceWith(box);
+  });
+}
+
+/* ── anexos: troca anexo:CAMINHO por URL assinada ────────── */
+
+const urlsAssinadas = new Map();   // caminho -> { url, expira }
+let tokenRender = 0;
+
+async function urlAssinada(caminho) {
+  const agora = Date.now();
+  const guardada = urlsAssinadas.get(caminho);
+  if (guardada && guardada.expira > agora + 60000) return guardada.url;
+  if (!sb || !user) return null;
+  const { data, error } = await sb.storage.from('anexos').createSignedUrl(caminho, 3600);
+  if (error || !data) { console.error('[anexo]', error); return null; }
+  urlsAssinadas.set(caminho, { url: data.signedUrl, expira: agora + 3600000 });
+  return data.signedUrl;
+}
+
+async function resolverAnexos(raiz, token) {
+  const alvos = [...raiz.querySelectorAll('[src^="anexo:"], [href^="anexo:"]')];
+  for (const nodo of alvos) {
+    const attr = nodo.hasAttribute('src') ? 'src' : 'href';
+    const caminho = nodo.getAttribute(attr).slice(6);
+    if (attr === 'href') { nodo.classList.add('anexo'); nodo.removeAttribute('target'); }
+    else nodo.setAttribute('data-pendente', '1');
+
+    const url = await urlAssinada(caminho);
+    if (token !== tokenRender) return;            // o preview já mudou; descarta
+    if (url) {
+      nodo.setAttribute(attr, url);
+      if (attr === 'href') { nodo.target = '_blank'; nodo.rel = 'noopener noreferrer'; }
+    } else {
+      nodo.removeAttribute(attr);
+    }
+    nodo.removeAttribute('data-pendente');
+  }
 }
 
 function paintPreview(src) {
+  const token = ++tokenRender;
   el.preview.innerHTML = renderMd(src);
   el.preview.querySelectorAll('a[href]').forEach(a => {
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
   });
+  montarCallouts(el.preview);
+  resolverAnexos(el.preview, token);
 }
 
 /* ── cache local ────────────────────────────────────────── */
@@ -353,6 +474,7 @@ function noteRow(n) {
   s.textContent = snippet(n);
 
   b.append(t, s);
+  pintar(b, n.color);
   return b;
 }
 
@@ -375,6 +497,7 @@ function folderRow(f) {
   s.textContent = count === 0 ? 'Vazia' : count === 1 ? '1 nota' : count + ' notas';
 
   b.append(t, s);
+  pintar(b, f.color);
   return b;
 }
 
@@ -542,7 +665,7 @@ el.btnNewFolder.addEventListener('click', () => {
   const name = (prompt('Nome da pasta:') || '').trim();
   if (!name) return;
   const now = new Date().toISOString();
-  const f = { id: crypto.randomUUID(), user_id: user.id, name, created_at: now, updated_at: now };
+  const f = { id: crypto.randomUUID(), user_id: user.id, name, color: null, created_at: now, updated_at: now };
   folders.push(f);
   pendingF.set(f.id, f);
   sortFolders(); saveCache(); syncMoveOptions(); renderList();
@@ -620,6 +743,7 @@ function openMenu(x, y, items) {
     b.className = 'menu-item' + (it.danger ? ' danger' : '');
     b.setAttribute('role', 'menuitem');
     if (it.icon) b.append(icon(it.icon));
+    if ('swatch' in it) b.append(amostra(it.swatch));
     const l = document.createElement('span');
     l.className = 'label';
     l.textContent = it.label;
@@ -644,6 +768,30 @@ function openMenu(x, y, items) {
   el.menu.style.top  = Math.max(8, Math.min(y, window.innerHeight - r.height - 8)) + 'px';
 }
 
+function setColor(id, cor, ehNota) {
+  const alvo = ehNota ? noteById(id) : folderById(id);
+  if (!alvo || !corValida(cor)) return;
+  alvo.color = cor;
+  alvo.updated_at = new Date().toISOString();
+  (ehNota ? pendingN : pendingF).set(alvo.id, alvo);
+  saveCache(); renderList();
+  setSync('Salvando…');
+  flushSoon(200);
+}
+
+function itensDeCor(alvo, ehNota) {
+  return [
+    { sep: true },
+    { head: 'Cor' },
+    ...CORES.map(c => ({
+      label: c.nome,
+      swatch: c.id,
+      checked: (alvo.color || null) === c.id,
+      run: () => setColor(alvo.id, c.id, ehNota),
+    })),
+  ];
+}
+
 function menuForRow(row, x, y) {
   if (row.classList.contains('folder')) {
     const f = folderById(row.dataset.folder);
@@ -653,6 +801,8 @@ function menuForRow(row, x, y) {
         run: () => { currentFolder = f.id; el.search.value = ''; renderList(); closeDrawer(); } },
       { sep: true },
       { label: 'Renomear', run: () => renameFolder(f.id) },
+      ...itensDeCor(f, false),
+      { sep: true },
       { label: 'Excluir pasta', danger: true, run: () => deleteFolder(f.id) },
     ]);
     return;
@@ -680,6 +830,7 @@ function menuForRow(row, x, y) {
       });
     }
   }
+  items.push(...itensDeCor(n, true));
   items.push({ sep: true }, { label: 'Excluir nota', danger: true, run: () => deleteNote(n.id) });
 
   openMenu(x, y, items);
@@ -763,6 +914,7 @@ function openNote(id) {
   el.btnDelete.hidden = !n;
   el.btnPin.hidden = !n;
   el.move.hidden = !n;
+  el.fmt.hidden = !n || previewOn;
   el.edMeta.textContent = '';
 
   if (n) { fillEditor(n); window.scrollTo(0, 0); }
@@ -824,7 +976,7 @@ function duplicateNote(id) {
     id: crypto.randomUUID(), user_id: user.id,
     title: (src.title || '').trim() ? src.title + ' (cópia)' : '',
     content: src.content, folder_id: src.folder_id || null, pinned: false,
-    created_at: now, updated_at: now,
+    color: src.color || null, created_at: now, updated_at: now,
   };
   notes.unshift(copy);
   pendingN.set(copy.id, copy);
@@ -859,7 +1011,8 @@ function newNote() {
   const now = new Date().toISOString();
   const n = {
     id: crypto.randomUUID(), user_id: user.id, title: '', content: '',
-    folder_id: currentFolder, pinned: false, created_at: now, updated_at: now,
+    folder_id: currentFolder, pinned: false, color: null,
+    created_at: now, updated_at: now,
   };
   notes.unshift(n);
   pendingN.set(n.id, n);
@@ -875,11 +1028,234 @@ el.btnNew2.addEventListener('click', newNote);
 
 el.btnDelete.addEventListener('click', () => deleteNote(currentId));
 
+/* ── barra de formatação ────────────────────────────────── */
+
+const PREFIXOS = /^(\s*)(#{1,6} |[-*+] |\d+\. |> |- \[[ x]\] )?/;
+
+// Negrito e itálico compartilham o asterisco, então não dá pra tratar
+// os marcadores como texto opaco: conta-se quantos existem em volta e
+// decide-se cada estilo por conta própria. `**x**` + itálico vira
+// `***x***`; o mesmo clique de novo volta para `**x**`.
+function envolverAsterisco(querItalico) {
+  const t = el.content;
+  let a = t.selectionStart, b = t.selectionEnd;
+  while (a > 0 && t.value[a - 1] === '*') a--;
+  while (b < t.value.length && t.value[b] === '*') b++;
+
+  const trecho = t.value.slice(a, b);
+  const esq = (trecho.match(/^\*+/) || [''])[0].length;
+  const dir = (trecho.match(/\*+$/) || [''])[0].length;
+  const par = Math.min(esq, dir);
+  const nucleo = trecho.slice(esq, trecho.length - dir);
+
+  const temItalico = par % 2 === 1;
+  const temNegrito = par >= 2;
+  const italico = querItalico ? !temItalico : temItalico;
+  const negrito = querItalico ? temNegrito : !temNegrito;
+
+  const marca = '*'.repeat((negrito ? 2 : 0) + (italico ? 1 : 0));
+  t.setRangeText(marca + nucleo + marca, a, b, 'select');
+  if (!nucleo) {
+    const meio = a + marca.length;
+    t.setSelectionRange(meio, meio);
+  }
+  t.focus(); touch();
+}
+
+function envolver(antes, depois) {
+  if (antes === '*') return envolverAsterisco(true);
+  if (antes === '**') return envolverAsterisco(false);
+
+  const t = el.content;
+  const a = t.selectionStart, b = t.selectionEnd;
+  const sel = t.value.slice(a, b);
+
+  // a seleção já carrega os marcadores (foi o que acabamos de aplicar)
+  if (sel.length >= antes.length + depois.length &&
+      sel.startsWith(antes) && sel.endsWith(depois)) {
+    t.setRangeText(sel.slice(antes.length, sel.length - depois.length), a, b, 'select');
+    t.focus(); touch();
+    return;
+  }
+
+  // os marcadores estão em volta da seleção
+  if (t.value.slice(a - antes.length, a) === antes &&
+      t.value.slice(b, b + depois.length) === depois) {
+    t.setRangeText(sel, a - antes.length, b + depois.length, 'select');
+    t.focus(); touch();
+    return;
+  }
+
+  t.setRangeText(antes + sel + depois, a, b, 'select');
+  if (!sel) {
+    const meio = a + antes.length;
+    t.setSelectionRange(meio, meio);
+  }
+  t.focus(); touch();
+}
+
+function prefixar(pref) {
+  const t = el.content;
+  const a = t.selectionStart, b = t.selectionEnd;
+  const ini = t.value.lastIndexOf('\n', a - 1) + 1;
+  let fim = t.value.indexOf('\n', b);
+  if (fim < 0) fim = t.value.length;
+
+  const linhas = t.value.slice(ini, fim).split('\n');
+  const todas = linhas.every(l => l.trimStart().startsWith(pref.trim()));
+  const novas = linhas.map(l => {
+    const limpa = l.replace(PREFIXOS, '$1');
+    return todas ? limpa : limpa.replace(/^(\s*)/, '$1' + pref);
+  }).join('\n');
+
+  t.setRangeText(novas, ini, fim, 'end');
+  t.focus(); touch();
+}
+
+function inserir(texto, recuo) {
+  const t = el.content;
+  const a = t.selectionStart;
+  t.setRangeText(texto, a, t.selectionEnd, 'end');
+  if (recuo != null) t.setSelectionRange(a + recuo, a + recuo);
+  t.focus(); touch();
+}
+
+const PLACEHOLDER_CODIGO = 'seu codigo aqui';
+
+function blocoDeCodigo() {
+  const t = el.content;
+  const sel = t.value.slice(t.selectionStart, t.selectionEnd);
+  const corpo = sel || PLACEHOLDER_CODIGO;
+  const inicio = t.selectionStart;
+  inserir('\n```\n' + corpo + '\n```\n');
+  if (!sel) {
+    const p = t.value.indexOf(PLACEHOLDER_CODIGO, inicio);
+    if (p >= 0) t.setSelectionRange(p, p + PLACEHOLDER_CODIGO.length);
+  }
+}
+
+function callout() {
+  const t = el.content;
+  const sel = t.value.slice(t.selectionStart, t.selectionEnd);
+  const corpo = (sel || 'Escreva o destaque aqui').split('\n').map(l => '> ' + l).join('\n');
+  inserir('\n> [!NOTA]\n' + corpo + '\n\n');
+}
+
+function inserirLink() {
+  const t = el.content;
+  const a = t.selectionStart, b = t.selectionEnd;
+  const sel = t.value.slice(a, b);
+  const texto = sel || 'texto do link';
+  t.setRangeText('[' + texto + '](https://)', a, b, 'end');
+  const fim = t.selectionEnd - 1;                // cursor dentro dos parênteses
+  t.setSelectionRange(fim, fim);
+  t.focus(); touch();
+}
+
+/* ── anexos: envio ──────────────────────────────────────── */
+
+const LIMITE = 25 * 1024 * 1024;
+
+async function enviarArquivos(lista) {
+  const arquivos = [...lista];
+  if (!arquivos.length || !sb || !user || !currentId) return;
+  el.fmt.classList.add('fmt-busy');
+
+  for (const f of arquivos) {
+    if (f.size > LIMITE) {
+      alert('"' + f.name + '" tem ' + (f.size / 1048576).toFixed(1) + ' MB. O limite e 25 MB.');
+      continue;
+    }
+    const seguro = f.name.replace(/[^\w.\-]+/g, '_').slice(-80);
+    const caminho = user.id + '/' + crypto.randomUUID() + '-' + seguro;
+    setSync('Enviando ' + f.name + '…');
+
+    const { error } = await sb.storage.from('anexos')
+      .upload(caminho, f, { contentType: f.type || 'application/octet-stream' });
+
+    if (error) {
+      console.error('[anexo]', error);
+      setSync('Falhou o envio de ' + f.name, true);
+      alert('Nao consegui enviar "' + f.name + '".\n\n' + error.message);
+      continue;
+    }
+    const ehImagem = /^image\//.test(f.type);
+    inserir('\n' + (ehImagem ? '!' : '') + '[' + f.name + '](anexo:' + caminho + ')\n');
+  }
+
+  el.fmt.classList.remove('fmt-busy');
+  flush();
+}
+
+const ACOES = {
+  bold:    () => envolver('**', '**'),
+  italic:  () => envolver('*', '*'),
+  strike:  () => envolver('~~', '~~'),
+  code:    () => envolver('`', '`'),
+  h1:      () => prefixar('# '),
+  h2:      () => prefixar('## '),
+  h3:      () => prefixar('### '),
+  ul:      () => prefixar('- '),
+  ol:      () => prefixar('1. '),
+  task:    () => prefixar('- [ ] '),
+  quote:   () => prefixar('> '),
+  block:   blocoDeCodigo,
+  callout: callout,
+  link:    inserirLink,
+  hr:      () => inserir('\n---\n'),
+  anexo:   () => el.arquivo.click(),
+};
+
+el.fmt.addEventListener('mousedown', e => {
+  // impede o textarea de perder o cursor antes da acao rodar
+  if (e.target.closest('button[data-fmt]')) e.preventDefault();
+});
+el.fmt.addEventListener('click', e => {
+  const b = e.target.closest('button[data-fmt]');
+  if (!b || !currentId) return;
+  if (previewOn) setPreview(false);
+  const acao = ACOES[b.dataset.fmt];
+  if (acao) acao();
+});
+
+el.arquivo.addEventListener('change', () => {
+  enviarArquivos(el.arquivo.files);
+  el.arquivo.value = '';
+});
+
+// colar arquivo direto no corpo da nota
+el.content.addEventListener('paste', e => {
+  const fs = e.clipboardData && e.clipboardData.files;
+  if (!fs || !fs.length) return;
+  e.preventDefault();
+  enviarArquivos(fs);
+});
+
+// arrastar arquivo pra dentro da nota
+const temArquivos = e => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+['dragenter', 'dragover'].forEach(ev => el.edBody.addEventListener(ev, e => {
+  if (!temArquivos(e) || !currentId) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+  el.edBody.classList.add('zona-solta');
+}));
+el.edBody.addEventListener('dragleave', e => {
+  if (!el.edBody.contains(e.relatedTarget)) el.edBody.classList.remove('zona-solta');
+});
+el.edBody.addEventListener('drop', e => {
+  if (!temArquivos(e) || !currentId) return;
+  e.preventDefault();
+  el.edBody.classList.remove('zona-solta');
+  if (previewOn) setPreview(false);
+  enviarArquivos(e.dataTransfer.files);
+});
+
 function setPreview(on) {
   previewOn = on;
   el.content.hidden = on;
   el.preview.hidden = !on;
   el.btnPreview.textContent = on ? 'Editar' : 'Preview';
+  el.fmt.hidden = on || !currentId;
   if (on) {
     const n = noteById(currentId);
     paintPreview(n ? n.content : '');
@@ -929,10 +1305,18 @@ document.addEventListener('keydown', e => {
   const mod = e.metaKey || e.ctrlKey;
   if (!mod) return;
   const k = e.key.toLowerCase();
-  if (k === 'k') { e.preventDefault(); openDrawer(); el.search.focus(); el.search.select(); }
+  if (k === 'k' && e.shiftKey && currentId && !previewOn) { e.preventDefault(); ACOES.link(); }
+  else if (k === 'k') { e.preventDefault(); openDrawer(); el.search.focus(); el.search.select(); }
   else if (k === 's') { e.preventDefault(); flush(); }
   else if (k === 'e' && currentId) { e.preventDefault(); setPreview(!previewOn); }
   else if (k === 'd' && currentId) { e.preventDefault(); togglePin(currentId); }
+  else if (currentId && !previewOn && document.activeElement === el.content) {
+    if (k === 'b') { e.preventDefault(); ACOES.bold(); }
+    else if (k === 'i') { e.preventDefault(); ACOES.italic(); }
+    else if (k === '1') { e.preventDefault(); ACOES.h1(); }
+    else if (k === '2') { e.preventDefault(); ACOES.h2(); }
+    else if (k === '3') { e.preventDefault(); ACOES.h3(); }
+  }
   else if (k === 'j' && e.shiftKey) { e.preventDefault(); newNote(); }
 });
 

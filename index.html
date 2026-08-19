@@ -107,6 +107,31 @@
       <button class="icon-btn danger" id="btn-delete" title="Excluir nota">Excluir</button>
     </header>
 
+    <div class="fmt" id="fmt" hidden>
+      <button data-fmt="bold"    class="b"    title="Negrito (Ctrl+B)">B</button>
+      <button data-fmt="italic"  class="i"    title="Itálico (Ctrl+I)">I</button>
+      <button data-fmt="strike"  class="s"    title="Riscado">S</button>
+      <button data-fmt="code"    class="mono" title="Código na linha">&lt;/&gt;</button>
+      <span class="div"></span>
+      <button data-fmt="h1" title="Título grande (Ctrl+1)">H1</button>
+      <button data-fmt="h2" title="Título médio (Ctrl+2)">H2</button>
+      <button data-fmt="h3" title="Título pequeno (Ctrl+3)">H3</button>
+      <span class="div"></span>
+      <button data-fmt="ul"    title="Lista">&bull;</button>
+      <button data-fmt="ol"    title="Lista numerada">1.</button>
+      <button data-fmt="task"  title="Caixa de seleção">&#9744;</button>
+      <button data-fmt="quote" title="Citação">&rdquo;</button>
+      <span class="div"></span>
+      <button data-fmt="block"  class="mono" title="Bloco de código">{ }</button>
+      <button data-fmt="callout" title="Callout / destaque">&#9432;</button>
+      <button data-fmt="link"   title="Link (Ctrl+Shift+K)">&#128279;</button>
+      <button data-fmt="hr"     title="Linha divisória">&mdash;</button>
+      <span class="div"></span>
+      <button data-fmt="anexo" title="Anexar arquivo (ou arraste pra nota)">&#128206;</button>
+    </div>
+
+    <input type="file" id="arquivo" multiple hidden>
+
     <div class="ed-main">
       <div class="ed-body" id="ed-body" hidden>
         <textarea id="title" class="title-input" rows="1" placeholder="Sem título" spellcheck="false"></textarea>

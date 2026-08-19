@@ -31,6 +31,13 @@ alter table public.notes
 alter table public.notes
   add column if not exists pinned boolean not null default false;
 
+-- Cor na barra lateral. Nulo = cor padrão do tema.
+alter table public.notes
+  add column if not exists color text;
+
+alter table public.folders
+  add column if not exists color text;
+
 create index if not exists notes_user_updated_idx
   on public.notes (user_id, updated_at desc);
 
@@ -124,3 +131,40 @@ exception
   when duplicate_object then null;
 end
 $$;
+
+
+-- ═══════════════════════════════════════════════════════════
+-- ANEXOS (Supabase Storage)
+-- Cria o balde privado e as regras de acesso. Cada arquivo mora
+-- numa pasta com o id do dono, e a política confere isso.
+-- ═══════════════════════════════════════════════════════════
+
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('anexos', 'anexos', false, 26214400)          -- 25 MB por arquivo
+on conflict (id) do update set
+  public = false,
+  file_size_limit = 26214400;
+
+drop policy if exists "anexos_select_own" on storage.objects;
+create policy "anexos_select_own" on storage.objects
+  for select using (
+    bucket_id = 'anexos' and auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+drop policy if exists "anexos_insert_own" on storage.objects;
+create policy "anexos_insert_own" on storage.objects
+  for insert with check (
+    bucket_id = 'anexos' and auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+drop policy if exists "anexos_update_own" on storage.objects;
+create policy "anexos_update_own" on storage.objects
+  for update using (
+    bucket_id = 'anexos' and auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+drop policy if exists "anexos_delete_own" on storage.objects;
+create policy "anexos_delete_own" on storage.objects
+  for delete using (
+    bucket_id = 'anexos' and auth.uid()::text = (storage.foldername(name))[1]
+  );
