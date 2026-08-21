@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>teste</title>
+<link rel="stylesheet" href="assets/styles.css"></head>
+<body>
+<div class="ed-body">
+<div id="content" class="content-input" role="textbox" aria-multiline="true" data-vazio="vazio"></div>
+</div>
+<script src="assets/editor.js"></script>
+<script>
+const c = document.getElementById('content');
+window.EditorVivo.instalar(c, {});
+c.value = "Primeira linha de texto\n\n## Um titulo aqui\n\n- item um\n- item dois\n\nTexto **negrito** e normal";
+window.log = [];
+c.addEventListener('input', () => window.log.push(['input', c.value.length, c.selectionStart]));
+</script>
+</body></html>
