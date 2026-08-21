@@ -4,8 +4,11 @@ Bloco de notas pessoal, minimalista, estilo Notion. Roda no GitHub Pages (site
 estático) com login de verdade e sincronização entre celular e computador via
 [Supabase](https://supabase.com) — plano grátis dá e sobra.
 
-- Markdown com barra de formatação e preview (`Ctrl+E`)
-- Pastas e notas fixadas, convivendo no mesmo nível
+- Markdown que se formata enquanto você escreve: título, negrito, lista,
+  código, callout e imagem já aparecem prontos, sem `###` na tela. Não existe
+  modo "preview" — escrever e ver são a mesma tela
+- Pastas e notas fixadas, convivendo no mesmo nível, na ordem que você
+  arrastar (ou por recência, até o dia em que você arrastar)
 - Cores por nota e por pasta, anexos e callouts
 - Funciona offline: tudo fica no `localStorage` e sobe sozinho quando a rede volta
 - Sync ao vivo — editou no PC, aparece no celular sem recarregar
@@ -267,12 +270,13 @@ Depois abra `http://localhost:8080`. Adicione `http://localhost:8080` nas
 | --- | --- |
 | `Ctrl/Cmd + K` | Buscar |
 | `Ctrl/Cmd + Shift + J` | Nova nota |
-| `Ctrl/Cmd + E` | Alternar preview do markdown |
 | `Ctrl/Cmd + D` | Fixar / desafixar a nota aberta |
 | `Ctrl/Cmd + B` | Negrito |
 | `Ctrl/Cmd + I` | Itálico |
 | `Ctrl/Cmd + 1/2/3` | Título grande / médio / pequeno |
 | `Ctrl/Cmd + Shift + K` | Inserir link |
+| `Ctrl/Cmd + Z` / `Ctrl/Cmd + Shift + Z` | Desfazer / refazer no corpo da nota |
+| `Ctrl/Cmd + clique` | Abre o link (ou o anexo) sob o cursor |
 | `Ctrl/Cmd + S` | Forçar sincronização |
 | `Tab` (no corpo) | Indenta dois espaços |
 | `Esc` (na busca) | Limpa a busca |
@@ -284,7 +288,8 @@ Depois abra `http://localhost:8080`. Adicione `http://localhost:8080` nas
 ```
 index.html               estrutura das três telas: setup, login, app
 assets/styles.css        todo o visual, tokens de tema no topo
-assets/app.js            estado, sync, editor, autenticação
+assets/app.js            estado, sync, lista lateral, autenticação
+assets/editor.js         o editor: markdown já formatado enquanto se escreve
 assets/config.js         suas duas chaves — o único arquivo que você edita
 schema.sql               tabelas + políticas de RLS + realtime
 sw.js                    cache da casca do app pra funcionar offline
@@ -303,10 +308,20 @@ Na prática: com as notas X, Y e Z, criar a pasta `AQUI` e mover X pra ela deixa
 raiz com `AQUI`, `Y` e `Z`. Abrindo `AQUI`, você vê só o X.
 
 Pastas e notas ficam numa lista só, sem cabeçalhos separando as duas coisas.
-A ordem é: fixadas no topo, pastas em seguida, depois as notas soltas por
-recência.
+A ordem é: fixadas no topo, pastas em seguida, depois as notas soltas.
+
+Dentro de cada uma dessas faixas a ordem é por recência **até você arrastar**:
+a partir daí vale a ordem que você escolheu, e ela vai junto pro celular. A
+linha azul mostra onde a nota vai cair; soltar em cima do meio de uma pasta
+guarda a nota lá dentro, e soltar na faixa das fixadas fixa a nota.
+Reordenar não conta como editar: o "Editada há X" da nota fica onde estava.
+
+> A ordem manual mora na coluna `ordem`, que veio depois. Se o seu banco é
+> antigo, rode o `schema.sql` de novo — sem isso o app funciona igual, só não
+> guarda a ordem escolhida.
 
 - **Criar pasta:** botão de pasta ao lado de "Nova nota".
+- **Reordenar:** arraste a nota (ou a pasta) pro lugar que quiser.
 - **Mover uma nota:** arraste pra cima da pasta, ou use o menu de contexto, ou o
   seletor no topo do editor.
 - **Tirar da pasta:** arraste pro botão de voltar, ou escolha "Sem pasta".
@@ -327,7 +342,7 @@ ignorada em vez de virar estilo.
 
 ## Escrevendo: a barra de formatação
 
-Aparece acima do texto quando há nota aberta, e some no preview.
+Aparece acima do texto quando há nota aberta.
 
 | Botão | O que faz |
 | --- | --- |
@@ -363,7 +378,8 @@ inglês (`NOTE`, `TIP`, `IMPORTANT`, `WARNING`, `CAUTION`). Cada um tem cor e
 
 Três formas de anexar: o botão 📎, arrastar o arquivo pra cima da nota, ou colar
 direto (`Ctrl+V`) com o arquivo na área de transferência. Imagens aparecem
-inline no preview; o resto vira um cartão clicável.
+inline enquanto você escreve; o resto vira um cartão com 📎, que abre com
+`Ctrl+clique`.
 
 Limite de 25 MB por arquivo. O plano grátis do Supabase dá 1 GB no total.
 

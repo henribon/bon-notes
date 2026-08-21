@@ -103,7 +103,6 @@
       <span class="spacer"></span>
       <select class="move" id="move" title="Mover para uma pasta" aria-label="Mover para uma pasta"></select>
       <button class="icon-btn" id="btn-pin" title="Fixar nota (Ctrl+D)" aria-pressed="false">☆</button>
-      <button class="icon-btn" id="btn-preview" title="Preview (Ctrl+E)">Preview</button>
       <button class="icon-btn danger" id="btn-delete" title="Excluir nota">Excluir</button>
     </header>
 
@@ -135,8 +134,9 @@
     <div class="ed-main">
       <div class="ed-body" id="ed-body" hidden>
         <textarea id="title" class="title-input" rows="1" placeholder="Sem título" spellcheck="false"></textarea>
-        <textarea id="content" class="content-input" placeholder="Comece a escrever. Markdown funciona: # título, **negrito**, - lista, [link](url), `código`."></textarea>
-        <article id="preview" class="md" hidden></article>
+        <div id="content" class="content-input" role="textbox" aria-multiline="true"
+             aria-label="Conteúdo da nota" spellcheck="true"
+             data-vazio="Comece a escrever. Markdown já aparece formatado: # título, **negrito**, - lista, [link](url), `código`."></div>
       </div>
 
       <div class="empty" id="empty">
@@ -150,16 +150,23 @@
   <div class="menu" id="menu" role="menu" hidden></div>
 </div>
 
+<!-- ── caixa de texto (o Electron não tem prompt()) ──────── -->
+<div class="modal" id="modal" hidden>
+  <form class="modal-box" id="modal-form" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <h2 id="modal-title"></h2>
+    <input id="modal-input" type="text" autocomplete="off">
+    <div class="modal-acoes">
+      <button type="button" class="linkish" id="modal-cancel">Cancelar</button>
+      <button type="submit" class="primary slim" id="modal-ok">Salvar</button>
+    </div>
+  </form>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"
         integrity="sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o"
         crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
-        integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi"
-        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"
-        integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a"
-        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="assets/config.js"></script>
+<script src="assets/editor.js"></script>
 <script src="assets/app.js"></script>
 </body>
 </html>

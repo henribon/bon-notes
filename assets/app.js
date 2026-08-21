@@ -23,13 +23,37 @@ const el = {
   edBody: $('ed-body'), edMeta: $('ed-meta'), empty: $('empty'),
   title: $('title'), content: $('content'), preview: $('preview'),
   move: $('move'), btnPin: $('btn-pin'),
-  btnPreview: $('btn-preview'), btnDelete: $('btn-delete'),
+  btnDelete: $('btn-delete'),
   menu: $('menu'), fmt: $('fmt'), arquivo: $('arquivo'),
+  modal: $('modal'), modalForm: $('modal-form'), modalTitle: $('modal-title'),
+  modalInput: $('modal-input'), modalOk: $('modal-ok'), modalCancel: $('modal-cancel'),
 };
 
+// o corpo da nota é um contenteditable que já mostra a formatação pronta;
+// depois disto ele responde igualzinho a uma <textarea>
+if (window.EditorVivo) {
+  window.EditorVivo.instalar(el.content, {
+    anexo: caminho => urlAssinada(caminho),
+    abrir: url => abrirLink(url),
+  });
+}
+
 const LS = { cache: 'notas:cache', theme: 'notas:theme', last: 'notas:last' };
-const NCOLS = ['id', 'user_id', 'title', 'content', 'folder_id', 'pinned', 'color', 'created_at', 'updated_at'];
-const FCOLS = ['id', 'user_id', 'name', 'color', 'created_at', 'updated_at'];
+const NCOLS = ['id', 'user_id', 'title', 'content', 'folder_id', 'pinned', 'color', 'ordem', 'created_at', 'updated_at'];
+const FCOLS = ['id', 'user_id', 'name', 'color', 'ordem', 'created_at', 'updated_at'];
+
+// Banco de antes da ordenação manual não tem a coluna `ordem`. Em vez de
+// quebrar o sync inteiro, o app percebe e segue sem ela até rodarem o schema.
+let temColunaOrdem = true;
+const colunas = base => temColunaOrdem ? base : base.filter(c => c !== 'ordem');
+const faltaOrdem = e => !!e && /ordem/i.test((e.message || '') + (e.details || '') + (e.hint || ''));
+
+function semColunaOrdem() {
+  if (!temColunaOrdem) return false;
+  temColunaOrdem = false;
+  console.warn('[sync] banco sem a coluna "ordem" — rode o schema.sql pra guardar a ordem manual');
+  return true;
+}
 
 const CORES = [
   { id: null, nome: 'Padrão' }, { id: 'vermelho', nome: 'Vermelho' },
@@ -48,7 +72,6 @@ let pendingN = new Map(), pendingF = new Map();
 let deletingN = new Set(), deletingF = new Set();
 let currentId = null;
 let currentFolder = null;      // null = raiz
-let previewOn = false;
 let channel = null;
 let saveTimer = null, listTimer = null, retryTimer = null;
 
@@ -95,6 +118,49 @@ function setSync(text, warn) {
   el.sync.classList.toggle('warn', !!warn);
 }
 
+/* ── caixa de texto ─────────────────────────────────────── */
+/* O Electron não implementa window.prompt() — chamar trava a ação inteira.
+   Esta caixa faz o mesmo papel e ainda combina com o resto do app. */
+
+let fecharModal = null;
+
+function pedirTexto(titulo, valor, opcoes) {
+  const op = opcoes || {};
+  if (fecharModal) fecharModal(null);
+
+  el.modalTitle.textContent = titulo;
+  el.modalInput.type = op.senha ? 'password' : 'text';
+  el.modalInput.value = valor || '';
+  el.modalInput.placeholder = op.dica || '';
+  el.modalOk.textContent = op.ok || 'Salvar';
+  el.modal.hidden = false;
+  el.modalInput.focus();
+  el.modalInput.select();
+
+  return new Promise(resolve => {
+    fecharModal = resposta => {
+      el.modal.hidden = true;
+      el.modalInput.value = '';
+      fecharModal = null;
+      document.removeEventListener('keydown', naTecla, true);
+      resolve(resposta);
+    };
+    function naTecla(e) {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); fecharModal(null); }
+    }
+    document.addEventListener('keydown', naTecla, true);
+  });
+}
+
+el.modalForm.addEventListener('submit', e => {
+  e.preventDefault();
+  if (fecharModal) fecharModal(el.modalInput.value);
+});
+el.modalCancel.addEventListener('click', () => { if (fecharModal) fecharModal(null); });
+el.modal.addEventListener('mousedown', e => {
+  if (e.target === el.modal && fecharModal) fecharModal(null);
+});
+
 function show(screen) {
   el.boot.hidden = true;
   el.setup.hidden = screen !== 'setup';
@@ -102,7 +168,11 @@ function show(screen) {
   el.app.hidden   = screen !== 'app';
 }
 
-function autoGrow(t) { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; }
+function autoGrow(t) {
+  if (t.tagName !== 'TEXTAREA') return;       // o editor vivo cresce sozinho
+  t.style.height = 'auto';
+  t.style.height = t.scrollHeight + 'px';
+}
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 const FOLDER_ICON = 'M1.5 3.5A1.5 1.5 0 013 2h3.1a1.5 1.5 0 011.06.44L8.2 3.5H13a1.5 1.5 0 011.5 1.5v7A1.5 1.5 0 0113 13.5H3A1.5 1.5 0 011.5 12v-8.5z';
@@ -152,74 +222,9 @@ el.btnTheme.addEventListener('click', () => {
   applyTheme();
 });
 
-/* ── markdown ───────────────────────────────────────────── */
-
-if (window.marked) marked.setOptions({ gfm: true, breaks: true });
-
-// o padrão do DOMPurify mais o nosso esquema "anexo:" (resolvido depois
-// para uma URL assinada). Nada além disso é permitido.
-const URI_OK = /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|anexo):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
-
-function renderMd(src) {
-  const html = window.marked ? marked.parse(src || '') : '';
-  return window.DOMPurify
-    ? DOMPurify.sanitize(html, { ADD_ATTR: ['target'], ALLOWED_URI_REGEXP: URI_OK })
-    : html;
-}
-
-/* ── callouts: > [!NOTA] vira um bloco destacado ─────────── */
-
-const CALLOUTS = {
-  nota: ['nota', 'ℹ️', 'Nota'],            note: ['nota', 'ℹ️', 'Nota'],
-  dica: ['dica', '💡', 'Dica'],            tip: ['dica', '💡', 'Dica'],
-  importante: ['importante', '📌', 'Importante'],
-  important: ['importante', '📌', 'Importante'],
-  atencao: ['atencao', '⚠️', 'Atenção'],   warning: ['atencao', '⚠️', 'Atenção'],
-  cuidado: ['cuidado', '🛑', 'Cuidado'],   caution: ['cuidado', '🛑', 'Cuidado'],
-};
-
-function primeiroTexto(no) {
-  // pula a quebra de linha entre <blockquote> e <p>: o marcador
-  // mora no primeiro texto com conteudo de verdade
-  const w = document.createTreeWalker(no, NodeFilter.SHOW_TEXT);
-  let n;
-  while ((n = w.nextNode())) if (n.data.trim()) return n;
-  return null;
-}
-
-function montarCallouts(raiz) {
-  raiz.querySelectorAll('blockquote').forEach(bq => {
-    const tn = primeiroTexto(bq);
-    if (!tn) return;
-    const m = tn.data.match(/^\s*\[!([\wÀ-ÿ]+)\]\s*/);
-    if (!m) return;
-    const def = CALLOUTS[fold(m[1])];
-    if (!def) return;
-
-    tn.data = tn.data.slice(m[0].length);        // tira só o marcador, preserva a formatação
-    const p1 = tn.parentElement;
-    if (p1 && !p1.textContent.trim() && !p1.querySelector('img')) p1.remove();
-
-    const box = document.createElement('div');
-    box.className = 'callout ' + def[0];
-    const ic = document.createElement('div');
-    ic.className = 'callout-ic';
-    ic.textContent = def[1];
-    const corpo = document.createElement('div');
-    corpo.className = 'callout-body';
-    const tit = document.createElement('div');
-    tit.className = 'callout-title';
-    tit.textContent = def[2];
-    corpo.append(tit, ...bq.childNodes);
-    box.append(ic, corpo);
-    bq.replaceWith(box);
-  });
-}
-
-/* ── anexos: troca anexo:CAMINHO por URL assinada ────────── */
+/* ── anexos: "anexo:CAMINHO" vira URL assinada ───────────── */
 
 const urlsAssinadas = new Map();   // caminho -> { url, expira }
-let tokenRender = 0;
 
 async function urlAssinada(caminho) {
   const agora = Date.now();
@@ -232,35 +237,14 @@ async function urlAssinada(caminho) {
   return data.signedUrl;
 }
 
-async function resolverAnexos(raiz, token) {
-  const alvos = [...raiz.querySelectorAll('[src^="anexo:"], [href^="anexo:"]')];
-  for (const nodo of alvos) {
-    const attr = nodo.hasAttribute('src') ? 'src' : 'href';
-    const caminho = nodo.getAttribute(attr).slice(6);
-    if (attr === 'href') { nodo.classList.add('anexo'); nodo.removeAttribute('target'); }
-    else nodo.setAttribute('data-pendente', '1');
-
-    const url = await urlAssinada(caminho);
-    if (token !== tokenRender) return;            // o preview já mudou; descarta
-    if (url) {
-      nodo.setAttribute(attr, url);
-      if (attr === 'href') { nodo.target = '_blank'; nodo.rel = 'noopener noreferrer'; }
-    } else {
-      nodo.removeAttribute(attr);
-    }
-    nodo.removeAttribute('data-pendente');
-  }
-}
-
-function paintPreview(src) {
-  const token = ++tokenRender;
-  el.preview.innerHTML = renderMd(src);
-  el.preview.querySelectorAll('a[href]').forEach(a => {
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-  });
-  montarCallouts(el.preview);
-  resolverAnexos(el.preview, token);
+// Ctrl+clique num link da nota: anexo abre com URL assinada, resto vai direto
+async function abrirLink(url) {
+  const destino = url.startsWith('anexo:') ? await urlAssinada(url.slice(6)) : url;
+  if (!destino) return;
+  if (/^(mailto|tel):/i.test(destino)) { window.open(destino); return; }
+  let alvo;
+  try { alvo = new URL(destino, location.href); } catch (e) { return; }
+  if (/^https?:$/.test(alvo.protocol)) window.open(alvo.href, '_blank', 'noopener');
 }
 
 /* ── cache local ────────────────────────────────────────── */
@@ -316,8 +300,8 @@ async function flush() {
   }
 
   setSync('Salvando…');
-  const bF = [...pendingF.values()].map(f => strip(f, FCOLS));
-  const bN = [...pendingN.values()].map(n => strip(n, NCOLS));
+  const bF = [...pendingF.values()].map(f => strip(f, colunas(FCOLS)));
+  const bN = [...pendingN.values()].map(n => strip(n, colunas(NCOLS)));
   const dN = [...deletingN];
   const dF = [...deletingF];
 
@@ -353,6 +337,7 @@ async function flush() {
     setSync(pendingCount() ? 'Salvando…' : 'Tudo salvo');
     if (pendingCount()) flushSoon(400);
   } catch (e) {
+    if (faltaOrdem(e) && semColunaOrdem()) { flush(); return; }
     console.error('[sync]', e);
     setSync('Erro ao salvar — tentando de novo', true);
     clearTimeout(retryTimer);
@@ -364,12 +349,14 @@ async function pull() {
   if (!sb || !user || !navigator.onLine) return;
 
   const [rn, rf] = await Promise.all([
-    sb.from('notes').select(NCOLS.join(',')).order('updated_at', { ascending: false }),
-    sb.from('folders').select(FCOLS.join(',')),
+    sb.from('notes').select(colunas(NCOLS).join(',')).order('updated_at', { ascending: false }),
+    sb.from('folders').select(colunas(FCOLS).join(',')),
   ]);
 
   if (rn.error || rf.error) {
-    console.error('[pull]', rn.error || rf.error);
+    const erro = rn.error || rf.error;
+    if (faltaOrdem(erro) && semColunaOrdem()) return pull();
+    console.error('[pull]', erro);
     setSync('Sem conexão com o servidor', true);
     return;
   }
@@ -450,10 +437,11 @@ function listMessage(text) {
   return p;
 }
 
-function noteRow(n) {
+function noteRow(n, grupo, i) {
   const b = document.createElement('button');
   b.className = 'item' + (n.id === currentId ? ' on' : '');
   b.dataset.id = n.id;
+  if (grupo) { b.dataset.grupo = grupo; b.dataset.i = i; }
   b.draggable = true;
 
   const t = document.createElement('div');
@@ -478,11 +466,13 @@ function noteRow(n) {
   return b;
 }
 
-function folderRow(f) {
+function folderRow(f, grupo, i) {
   const count = notes.filter(n => n.folder_id === f.id).length;
   const b = document.createElement('button');
   b.className = 'item folder';
   b.dataset.folder = f.id;
+  if (grupo) { b.dataset.grupo = grupo; b.dataset.i = i; }
+  b.draggable = true;
 
   const t = document.createElement('div');
   t.className = 'item-t';
@@ -502,6 +492,32 @@ function folderRow(f) {
 }
 
 function byRecency(a, b) { return Date.parse(b.updated_at) - Date.parse(a.updated_at); }
+function byName(a, b) { return fold(a.name).localeCompare(fold(b.name), 'pt-BR'); }
+
+/* ── a ordem que você escolher ──────────────────────────── */
+/* `ordem` manda; quem nunca foi arrastado vem depois, por recência. Assim a
+   lista continua se organizando sozinha até o dia em que você mexer nela. */
+
+const temOrdem = x => Number.isFinite(x.ordem);
+
+function ordenar(lista, empate) {
+  return lista.slice().sort((a, b) => {
+    if (temOrdem(a) && temOrdem(b)) return a.ordem - b.ordem || empate(a, b);
+    if (temOrdem(a) !== temOrdem(b)) return temOrdem(a) ? -1 : 1;
+    return empate(a, b);
+  });
+}
+
+// grupo = "tipo:pasta" — cada um é uma faixa contígua da lista lateral
+function itensDoGrupo(grupo) {
+  const corte = grupo.indexOf(':');
+  const tipo = grupo.slice(0, corte);
+  const pasta = grupo.slice(corte + 1);
+  if (tipo === 'pastas') return ordenar(folders, byName);
+  if (tipo === 'fix') return ordenar(notes.filter(n => n.pinned && (!pasta || n.folder_id === pasta)), byRecency);
+  if (tipo === 'soltas') return ordenar(notes.filter(n => !n.pinned && !n.folder_id), byRecency);
+  return ordenar(notes.filter(n => !n.pinned && n.folder_id === pasta), byRecency);
+}
 
 function renderList() {
   clearTimeout(listTimer);
@@ -510,43 +526,37 @@ function renderList() {
   el.list.replaceChildren();
   el.crumb.hidden = !currentFolder || !!q;
 
-  // ── busca: resultado plano, atravessa pastas
+  // ── busca: resultado plano, atravessa pastas (aqui não se reordena)
   if (q) {
     const hits = notes
       .filter(n => fold(n.title).includes(q) || fold(n.content).includes(q))
       .sort(byRecency);
     if (!hits.length) { el.list.append(listMessage('Nada encontrado.')); return; }
-    hits.forEach(n => el.list.append(noteRow(n)));
+    hits.forEach(n => el.list.append(noteRow(n, '', 0)));
     return;
   }
+
+  const despejar = (grupo, linha) => {
+    const itens = itensDoGrupo(grupo);
+    itens.forEach((x, i) => el.list.append(linha(x, grupo, i)));
+    return itens.length;
+  };
 
   // ── dentro de uma pasta
   if (currentFolder) {
     const f = folderById(currentFolder);
     el.crumbName.textContent = f ? ((f.name || '').trim() || 'Sem nome') : '';
-    const inside = notes
-      .filter(n => n.folder_id === currentFolder)
-      .sort((a, b) => (Number(b.pinned) - Number(a.pinned)) || byRecency(a, b));
-    if (!inside.length) {
-      el.list.append(listMessage('Pasta vazia. Arraste uma nota pra cá, ou use "Nova nota".'));
-      return;
-    }
-    inside.forEach(n => el.list.append(noteRow(n)));
+    const fixadas = despejar('fix:' + currentFolder, noteRow);
+    const resto = despejar('notas:' + currentFolder, noteRow);
+    if (!fixadas && !resto) el.list.append(listMessage('Pasta vazia. Arraste uma nota pra cá, ou use "Nova nota".'));
     return;
   }
 
-  // ── raiz: uma lista só. Fixadas no topo, pastas, depois o resto por recência.
-  const pinned = notes.filter(n => n.pinned).sort(byRecency);
-  const loose  = notes.filter(n => !n.folder_id && !n.pinned).sort(byRecency);
-
-  if (!pinned.length && !folders.length && !loose.length) {
-    el.list.append(listMessage('Nenhuma nota ainda.'));
-    return;
-  }
-
-  pinned.forEach(n => el.list.append(noteRow(n)));
-  folders.forEach(f => el.list.append(folderRow(f)));
-  loose.forEach(n => el.list.append(noteRow(n)));
+  // ── raiz: fixadas no topo, pastas, depois o resto
+  const fixadas = despejar('fix:', noteRow);
+  const pastas = despejar('pastas:', folderRow);
+  const soltas = despejar('soltas:', noteRow);
+  if (!fixadas && !pastas && !soltas) el.list.append(listMessage('Nenhuma nota ainda.'));
 }
 
 el.list.addEventListener('click', e => {
@@ -561,9 +571,10 @@ el.list.addEventListener('click', e => {
 
 el.btnBack.addEventListener('click', () => { currentFolder = null; renderList(); });
 
-/* ── arrastar nota para dentro/fora de pasta ────────────── */
+/* ── arrastar: joga na pasta ou ordena do jeito que quiser ─ */
 
-let dragId = null;
+let arrasto = null;      // { tipo, id }
+let destino = null;      // { dentro } ou { grupo, indice }
 
 function moveNote(id, folderId) {
   const n = noteById(id);
@@ -581,62 +592,139 @@ function moveNote(id, folderId) {
 }
 
 function clearDropHints() {
-  document.querySelectorAll('.drop-on').forEach(e => e.classList.remove('drop-on'));
+  document.querySelectorAll('.drop-on,.drop-antes,.drop-depois')
+    .forEach(e => e.classList.remove('drop-on', 'drop-antes', 'drop-depois'));
+}
+
+// nota não entra na faixa das pastas, e pasta não sai dela
+function podeSoltar(grupo) {
+  if (!grupo || !arrasto) return false;
+  const ehFaixaDePastas = grupo.startsWith('pastas:');
+  return arrasto.tipo === 'pasta' ? ehFaixaDePastas : !ehFaixaDePastas;
+}
+
+// cair noutra faixa também fixa, desafixa ou muda a nota de pasta
+function aplicarGrupo(n, grupo) {
+  const corte = grupo.indexOf(':');
+  const fixar = grupo.slice(0, corte) === 'fix';
+  const pasta = grupo.slice(corte + 1);
+  const destinoPasta = pasta || (fixar ? (n.folder_id || null) : null);
+  if (!!n.pinned === fixar && (n.folder_id || null) === destinoPasta) return false;
+  n.pinned = fixar;
+  n.folder_id = destinoPasta;
+  n.updated_at = new Date().toISOString();
+  return true;
+}
+
+// renumera a faixa inteira; só quem saiu do lugar vai pro servidor
+function numerar(lista, pend) {
+  lista.forEach((x, i) => {
+    const alvo = (i + 1) * 10;
+    if (x.ordem === alvo) return;
+    x.ordem = alvo;
+    pend.set(x.id, x);
+  });
+}
+
+function soltarEm(grupo, indice) {
+  const ehPasta = arrasto.tipo === 'pasta';
+  const item = ehPasta ? folderById(arrasto.id) : noteById(arrasto.id);
+  if (!item) return;
+
+  const mudouDeFaixa = !ehPasta && aplicarGrupo(item, grupo);
+  const lista = itensDoGrupo(grupo).filter(x => x.id !== item.id);
+  lista.splice(Math.max(0, Math.min(indice, lista.length)), 0, item);
+
+  const pend = ehPasta ? pendingF : pendingN;
+  if (mudouDeFaixa) pend.set(item.id, item);
+  numerar(lista, pend);
+
+  sortNotes(); sortFolders(); saveCache(); syncMoveOptions(); renderList();
+  if (mudouDeFaixa && currentId === item.id) { paintPin(item); el.move.value = item.folder_id || ''; }
+  setSync('Salvando…');
+  flushSoon(200);
 }
 
 el.list.addEventListener('dragstart', e => {
-  const row = e.target.closest('.item[data-id]');
+  const row = e.target.closest('.item');
   if (!row) return;
-  dragId = row.dataset.id;
+  arrasto = row.dataset.folder
+    ? { tipo: 'pasta', id: row.dataset.folder }
+    : { tipo: 'nota', id: row.dataset.id };
   row.classList.add('dragging');
   e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', dragId);
+  e.dataTransfer.setData('text/plain', arrasto.id);
 });
 
 el.list.addEventListener('dragend', () => {
-  dragId = null;
+  arrasto = null;
+  destino = null;
   document.querySelectorAll('.dragging').forEach(e => e.classList.remove('dragging'));
   clearDropHints();
 });
 
 el.list.addEventListener('dragover', e => {
-  const target = e.target.closest('.item.folder');
-  if (!target || !dragId) return;
+  if (!arrasto) return;
+  const row = e.target.closest('.item');
+  clearDropHints();
+  destino = null;
+
+  if (row) {
+    const r = row.getBoundingClientRect();
+    const onde = (e.clientY - r.top) / (r.height || 1);
+    const naPasta = row.classList.contains('folder') && arrasto.tipo === 'nota';
+
+    if (naPasta && onde > 0.28 && onde < 0.72) {
+      destino = { dentro: row.dataset.folder };
+      row.classList.add('drop-on');
+    } else if (podeSoltar(row.dataset.grupo)) {
+      const depois = onde > 0.5;
+      destino = { grupo: row.dataset.grupo, indice: Number(row.dataset.i) + (depois ? 1 : 0) };
+      row.classList.add(depois ? 'drop-depois' : 'drop-antes');
+    }
+  } else {
+    // espaço vazio embaixo: cai no fim da última faixa que aceitar
+    const ultima = [...el.list.querySelectorAll('.item[data-grupo]')]
+      .reverse().find(x => podeSoltar(x.dataset.grupo));
+    if (ultima) {
+      destino = { grupo: ultima.dataset.grupo, indice: Number(ultima.dataset.i) + 1 };
+      ultima.classList.add('drop-depois');
+    }
+  }
+
+  if (!destino) return;
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
-  if (!target.classList.contains('drop-on')) {
-    clearDropHints();
-    target.classList.add('drop-on');
-  }
 });
 
 el.list.addEventListener('dragleave', e => {
-  const target = e.target.closest('.item.folder');
-  if (target && !target.contains(e.relatedTarget)) target.classList.remove('drop-on');
+  if (!el.list.contains(e.relatedTarget)) { clearDropHints(); destino = null; }
 });
 
 el.list.addEventListener('drop', e => {
-  const target = e.target.closest('.item.folder');
-  if (!target || !dragId) return;
+  if (!arrasto || !destino) return;
   e.preventDefault();
-  moveNote(dragId, target.dataset.folder);
-  dragId = null;
+  if (destino.dentro) moveNote(arrasto.id, destino.dentro);
+  else soltarEm(destino.grupo, destino.indice);
+  arrasto = null;
+  destino = null;
   clearDropHints();
 });
 
 // dentro de uma pasta, soltar no "voltar" tira a nota da pasta
 el.btnBack.addEventListener('dragover', e => {
-  if (!dragId) return;
+  if (!arrasto || arrasto.tipo !== 'nota') return;
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
   el.btnBack.classList.add('drop-on');
 });
 el.btnBack.addEventListener('dragleave', () => el.btnBack.classList.remove('drop-on'));
 el.btnBack.addEventListener('drop', e => {
-  if (!dragId) return;
+  if (!arrasto || arrasto.tipo !== 'nota') return;
   e.preventDefault();
-  moveNote(dragId, null);
-  dragId = null;
+  moveNote(arrasto.id, null);
+  arrasto = null;
+  destino = null;
   clearDropHints();
 });
 
@@ -660,9 +748,9 @@ function syncMoveOptions() {
   el.move.value = n && n.folder_id ? n.folder_id : '';
 }
 
-el.btnNewFolder.addEventListener('click', () => {
+el.btnNewFolder.addEventListener('click', async () => {
   if (!user) return;
-  const name = (prompt('Nome da pasta:') || '').trim();
+  const name = ((await pedirTexto('Nova pasta', '', { dica: 'Nome da pasta', ok: 'Criar' })) || '').trim();
   if (!name) return;
   const now = new Date().toISOString();
   const f = { id: crypto.randomUUID(), user_id: user.id, name, color: null, created_at: now, updated_at: now };
@@ -672,10 +760,10 @@ el.btnNewFolder.addEventListener('click', () => {
   flushSoon(300);
 });
 
-function renameFolder(id) {
+async function renameFolder(id) {
   const f = folderById(id);
   if (!f) return;
-  const name = (prompt('Novo nome da pasta:', f.name) || '').trim();
+  const name = ((await pedirTexto('Renomear pasta', f.name, { ok: 'Renomear' })) || '').trim();
   if (!name || name === f.name) return;
   f.name = name;
   f.updated_at = new Date().toISOString();
@@ -900,7 +988,6 @@ function fillEditor(n) {
   paintPin(n);
   el.move.value = n.folder_id || '';
   el.edMeta.textContent = 'Editada ' + rel(n.updated_at);
-  if (previewOn) paintPreview(n.content);
 }
 
 function openNote(id) {
@@ -910,11 +997,10 @@ function openNote(id) {
   const n = id ? noteById(id) : null;
   el.edBody.hidden = !n;
   el.empty.hidden = !!n;
-  el.btnPreview.hidden = !n;
   el.btnDelete.hidden = !n;
   el.btnPin.hidden = !n;
   el.move.hidden = !n;
-  el.fmt.hidden = !n || previewOn;
+  el.fmt.hidden = !n;
   el.edMeta.textContent = '';
 
   if (n) { fillEditor(n); window.scrollTo(0, 0); }
@@ -934,7 +1020,6 @@ function touch() {
   el.edMeta.textContent = 'Editada agora mesmo';
   autoGrow(el.title);
   autoGrow(el.content);
-  if (previewOn) paintPreview(n.content);
   renderListSoon();
   flushSoon();
 }
@@ -1014,6 +1099,8 @@ function newNote() {
     folder_id: currentFolder, pinned: false, color: null,
     created_at: now, updated_at: now,
   };
+  const acima = notes.filter(x => !x.pinned && (x.folder_id || null) === (currentFolder || null) && temOrdem(x));
+  if (acima.length) n.ordem = Math.min(...acima.map(x => x.ordem)) - 10;
   notes.unshift(n);
   pendingN.set(n.id, n);
   saveCache();
@@ -1213,7 +1300,6 @@ el.fmt.addEventListener('mousedown', e => {
 el.fmt.addEventListener('click', e => {
   const b = e.target.closest('button[data-fmt]');
   if (!b || !currentId) return;
-  if (previewOn) setPreview(false);
   const acao = ACOES[b.dataset.fmt];
   if (acao) acao();
 });
@@ -1246,25 +1332,8 @@ el.edBody.addEventListener('drop', e => {
   if (!temArquivos(e) || !currentId) return;
   e.preventDefault();
   el.edBody.classList.remove('zona-solta');
-  if (previewOn) setPreview(false);
   enviarArquivos(e.dataTransfer.files);
 });
-
-function setPreview(on) {
-  previewOn = on;
-  el.content.hidden = on;
-  el.preview.hidden = !on;
-  el.btnPreview.textContent = on ? 'Editar' : 'Preview';
-  el.fmt.hidden = on || !currentId;
-  if (on) {
-    const n = noteById(currentId);
-    paintPreview(n ? n.content : '');
-  } else {
-    el.content.focus();
-    autoGrow(el.content);
-  }
-}
-el.btnPreview.addEventListener('click', () => setPreview(!previewOn));
 
 window.addEventListener('scroll', () => {
   el.edHead.classList.toggle('scrolled', window.scrollY > 4);
@@ -1305,12 +1374,11 @@ document.addEventListener('keydown', e => {
   const mod = e.metaKey || e.ctrlKey;
   if (!mod) return;
   const k = e.key.toLowerCase();
-  if (k === 'k' && e.shiftKey && currentId && !previewOn) { e.preventDefault(); ACOES.link(); }
+  if (k === 'k' && e.shiftKey && currentId) { e.preventDefault(); ACOES.link(); }
   else if (k === 'k') { e.preventDefault(); openDrawer(); el.search.focus(); el.search.select(); }
   else if (k === 's') { e.preventDefault(); flush(); }
-  else if (k === 'e' && currentId) { e.preventDefault(); setPreview(!previewOn); }
   else if (k === 'd' && currentId) { e.preventDefault(); togglePin(currentId); }
-  else if (currentId && !previewOn && document.activeElement === el.content) {
+  else if (currentId && document.activeElement === el.content) {
     if (k === 'b') { e.preventDefault(); ACOES.bold(); }
     else if (k === 'i') { e.preventDefault(); ACOES.italic(); }
     else if (k === '1') { e.preventDefault(); ACOES.h1(); }
@@ -1436,7 +1504,7 @@ async function boot() {
 
   sb.auth.onAuthStateChange(async (event, session) => {
     if (event === 'PASSWORD_RECOVERY') {
-      const pass = prompt('Digite a nova senha (mínimo 8 caracteres):');
+      const pass = await pedirTexto('Nova senha', '', { senha: true, dica: 'mínimo 8 caracteres', ok: 'Atualizar' });
       if (pass && pass.length >= 8) {
         const { error } = await sb.auth.updateUser({ password: pass });
         alert(error ? humanize(error.message) : 'Senha atualizada.');

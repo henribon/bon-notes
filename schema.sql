@@ -38,6 +38,15 @@ alter table public.notes
 alter table public.folders
   add column if not exists color text;
 
+-- ── ordem escolhida à mão na lista lateral ────────────────
+-- Nulo = nunca foi arrastada; a lista cai na ordem por recência.
+
+alter table public.notes
+  add column if not exists ordem double precision;
+
+alter table public.folders
+  add column if not exists ordem double precision;
+
 create index if not exists notes_user_updated_idx
   on public.notes (user_id, updated_at desc);
 
@@ -91,12 +100,20 @@ create policy "folders_delete_own" on public.folders
 -- O horário do servidor manda. Se o relógio do celular estiver
 -- adiantado, a nota não fica grudada no topo da lista.
 
+-- Arrastar pra reordenar não é "editar": quando só a posição muda, o
+-- updated_at fica onde estava e a nota não pula pro topo da lista.
 create or replace function public.notes_touch_updated_at()
 returns trigger
 language plpgsql
 as $$
 begin
-  new.updated_at := now();
+  if tg_op = 'UPDATE'
+     and (to_jsonb(new) - 'ordem' - 'updated_at') = (to_jsonb(old) - 'ordem' - 'updated_at')
+  then
+    new.updated_at := old.updated_at;
+  else
+    new.updated_at := now();
+  end if;
   return new;
 end;
 $$;

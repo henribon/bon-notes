@@ -160,6 +160,39 @@ function criarBandeja() {
   tray.on('click', alternarJanela);
 }
 
+/* ── menu ────────────────────────────────────── */
+
+// O menu padrão do Electron sequestra Ctrl+Z pro desfazer nativo, que não
+// enxerga o editor do app. Este menu tem o resto e deixa o Ctrl+Z passar.
+function criarMenu() {
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    {
+      label: 'Editar',
+      submenu: [
+        { role: 'cut', label: 'Recortar' },
+        { role: 'copy', label: 'Copiar' },
+        { role: 'paste', label: 'Colar' },
+        { type: 'separator' },
+        { role: 'selectAll', label: 'Selecionar tudo' },
+      ],
+    },
+    {
+      label: 'Janela',
+      submenu: [
+        { role: 'reload', label: 'Recarregar' },
+        { role: 'forceReload', label: 'Recarregar do zero' },
+        { role: 'toggleDevTools', label: 'Ferramentas de desenvolvedor' },
+        { type: 'separator' },
+        { role: 'resetZoom', label: 'Zoom normal' },
+        { role: 'zoomIn', label: 'Aumentar zoom' },
+        { role: 'zoomOut', label: 'Diminuir zoom' },
+        { type: 'separator' },
+        { role: 'togglefullscreen', label: 'Tela cheia' },
+      ],
+    },
+  ]));
+}
+
 /* ── ciclo de vida ──────────────────────────────────────── */
 
 if (!app.requestSingleInstanceLock()) {
@@ -169,6 +202,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     app.setAppUserModelId('com.henribon.notas');
+    criarMenu();
     criarJanela();
     criarBandeja();
     if (!globalShortcut.register(HOTKEY, alternarJanela)) {

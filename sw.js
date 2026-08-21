@@ -1,13 +1,14 @@
 /* Service worker: deixa o app abrir offline.
    As notas em si já ficam no localStorage — isso aqui cacheia só a "casca". */
 
-const VERSION = 'notas-v3';
+const VERSION = 'notas-v5';
 const SHELL = [
   './',
   './index.html',
   './manifest.webmanifest',
   './assets/styles.css',
   './assets/app.js',
+  './assets/editor.js',
   './assets/config.js',
   './assets/icon.svg',
   './assets/icon-192.png',
