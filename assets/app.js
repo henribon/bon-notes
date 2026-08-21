@@ -1031,6 +1031,36 @@ el.title.addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); el.content.focus(); el.content.setSelectionRange(0, 0); }
 });
 
+/* A folha tem margem larga dos dois lados do texto. Clicar nela não acertava
+   nada e o cursor simplesmente não aparecia — como numa folha de papel de
+   verdade, o clique agora cai na linha mais próxima. */
+const pontoDoCursor = (x, y) => {
+  if (document.caretRangeFromPoint) return document.caretRangeFromPoint(x, y);
+  if (!document.caretPositionFromPoint) return null;
+  const p = document.caretPositionFromPoint(x, y);
+  if (!p) return null;
+  const r = document.createRange();
+  r.setStart(p.offsetNode, p.offset);
+  r.collapse(true);
+  return r;
+};
+
+el.edBody.addEventListener('mousedown', e => {
+  if (e.button !== 0 || e.target !== el.edBody) return;   // só a margem, não os filhos
+  const r = el.content.getBoundingClientRect();
+  if (e.clientY < r.top) { el.title.focus(); return; }    // acima do corpo é o título
+  e.preventDefault();
+  const alcance = pontoDoCursor(
+    Math.min(Math.max(e.clientX, r.left + 1), r.right - 1),
+    Math.min(Math.max(e.clientY, r.top + 1), r.bottom - 1),
+  );
+  el.content.focus();
+  if (!alcance || !el.content.contains(alcance.startContainer)) return;
+  const s = getSelection();
+  s.removeAllRanges();
+  s.addRange(alcance);
+});
+
 el.content.addEventListener('keydown', e => {
   if (e.key === 'Tab') {
     e.preventDefault();

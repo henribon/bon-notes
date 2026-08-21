@@ -637,19 +637,47 @@ function instalar(raiz, opcoes) {
     op.abrir(alvo.dataset.url);
   });
 
+  // onde a linha `ln` começa dentro do markdown
+  function ondeComeca(ln) {
+    const i = ln ? [...raiz.children].indexOf(ln) : -1;
+    if (i < 0) return null;
+    const linhas = raiz.value.split('\n');
+    let base = 0;
+    for (let k = 0; k < i; k++) base += linhas[k].length + 1;
+    return { i, base, linha: linhas[i] || '' };
+  }
+
+  /* Os enfeites (bolinha, ícone e título do callout, imagem) são
+     contenteditable=false. Clicar num deles faz o Chromium jogar a seleção pra
+     fora do editor: o cursor some, `varrer` não acha mais onde ele estava e o
+     teclado para de responder. Então o clique é tratado aqui — vira um cursor
+     no texto da própria linha, que é o que quem clicou queria. */
+  const SO_MARCADOR = /^(\s*(?:[-*+] \[[ xX]\] |[-*+] |\d+[.)] |> )?)/;
+
+  raiz.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    const enfeite = e.target.closest && e.target.closest('[data-falso]');
+    if (!enfeite || enfeite.classList.contains('caixa')) return;   // a caixinha tem uso próprio
+    const onde = ondeComeca(enfeite.closest('.ln'));
+    if (!onde) return;
+    e.preventDefault();                       // sem isso o navegador mata a seleção
+    // na imagem o cursor vai pro fim da linha; nos marcadores, pro início do texto
+    const salto = enfeite.nodeName === 'IMG'
+      ? onde.linha.length
+      : SO_MARCADOR.exec(onde.linha)[1].length;
+    raiz.focus();
+    raiz.setSelectionRange(onde.base + salto, onde.base + salto);
+  });
+
   // clicar na caixinha marca e desmarca a tarefa
   raiz.addEventListener('click', e => {
     const caixa = e.target.closest && e.target.closest('.caixa');
     if (!caixa) return;
-    const ln = caixa.closest('.ln');
-    const i = [...raiz.children].indexOf(ln);
-    if (i < 0) return;
-    const linhas = raiz.value.split('\n');
-    const m = /^\s*[-*+] \[([ xX])\]/.exec(linhas[i] || '');
+    const onde = ondeComeca(caixa.closest('.ln'));
+    if (!onde) return;
+    const m = /^\s*[-*+] \[([ xX])\]/.exec(onde.linha);
     if (!m) return;
-    let base = 0;
-    for (let k = 0; k < i; k++) base += linhas[k].length + 1;
-    const p = base + linhas[i].indexOf('[') + 1;
+    const p = onde.base + onde.linha.indexOf('[') + 1;
     raiz.setRangeText(m[1] === ' ' ? 'x' : ' ', p, p + 1, 'end');
     disparar();
   });
